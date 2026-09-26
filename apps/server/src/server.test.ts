@@ -11464,6 +11464,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   branch: "main",
                   worktreePath: null,
                   createdAt,
+                  linkedSlackThreads: ["https://acme.slack.com/archives/C123/p1790000000000000"],
                 },
                 prepareWorktree: {
                   projectCwd: "/tmp/project",
@@ -11479,6 +11480,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
         assert.equal(response.sequence, 8);
+        // A thread started from Slack is linked at creation, not patched afterwards.
+        const createCommand = dispatchedCommands[0];
+        assertTrue(createCommand?.type === "thread.create");
+        if (createCommand?.type === "thread.create") {
+          assert.deepEqual(createCommand.linkedSlackThreads, [
+            "https://acme.slack.com/archives/C123/p1790000000000000",
+          ]);
+        }
         assert.deepEqual(
           dispatchedCommands.map((command) => command.type),
           [
