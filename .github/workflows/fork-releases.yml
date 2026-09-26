@@ -111,7 +111,7 @@ jobs:
           if [ "$SIGNED" = true ]; then
             printf 'Signed release. Select this track in Settings → About → Update track.\n' >> "$notes"
           else
-            printf 'Manual download for Apple Silicon. Unzip and replace T3 Code.app. Automatic installation is disabled until signing is configured.\n' >> "$notes"
+            printf 'Apple Silicon build. Installed T3 Code on this track updates itself from Settings → About; for a first install, unzip and drag T3 Code.app to Applications.\n' >> "$notes"
           fi
           printf '\nStable, Nightly, and Personal use separate data profiles. Personal preserves the existing ~/.t3-personal profile.\n' >> "$notes"
           prerelease=(--prerelease=false)
@@ -126,3 +126,9 @@ jobs:
             files+=(release/fork/*-mac.yml release/fork/*.blockmap)
           fi
           gh release upload "$tag" "${files[@]}" --clobber
+          # The in-app updater installs the newest archive it finds; older ones only add noise.
+          for asset in $(gh release view "$tag" --json assets --jq '.assets[].name'); do
+            case "$asset" in
+              *.zip) [ "$asset" = "$(basename "${files[0]}")" ] || gh release delete-asset "$tag" "$asset" --yes ;;
+            esac
+          done

@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 
 import * as Electron from "electron";
 
+import { forkDesktopChannel } from "@t3tools/shared/desktopReleaseChannels";
 import * as NetService from "@t3tools/shared/Net";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import type { RemoteT3RunnerOptions } from "@t3tools/ssh/tunnel";
@@ -30,6 +31,7 @@ import * as ElectronSafeStorage from "./electron/ElectronSafeStorage.ts";
 import * as ElectronShell from "./electron/ElectronShell.ts";
 import * as ElectronTheme from "./electron/ElectronTheme.ts";
 import * as ElectronUpdater from "./electron/ElectronUpdater.ts";
+import * as ForkUpdater from "./updates/ForkUpdater.ts";
 import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppActivation from "./app/DesktopAppActivation.ts";
@@ -119,7 +121,15 @@ const electronLayer = Layer.mergeAll(
   ElectronSafeStorage.layer,
   ElectronShell.layer,
   ElectronTheme.layer,
-  ElectronUpdater.layer,
+  // Fork tracks on macOS update by swapping the bundle; Squirrel.Mac needs Apple signing.
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const platform = yield* HostProcessPlatform;
+      return platform === "darwin" && forkDesktopChannel(Electron.app.getVersion()) !== null
+        ? ForkUpdater.layer
+        : ElectronUpdater.layer;
+    }),
+  ),
   ElectronWindow.layer,
   DesktopIpc.layer(Electron.ipcMain),
 );

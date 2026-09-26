@@ -346,8 +346,14 @@ export const make = Effect.gen(function* () {
           )
       : false;
 
+  // Fork tracks on macOS need no feed manifest: ForkUpdater reads the track's GitHub release.
+  const forkUpdaterAvailable =
+    environment.platform === "darwin" && forkDesktopChannel(environment.appVersion) !== null;
   const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
-    Effect.map((appUpdateYmlConfig) => Option.isSome(appUpdateYmlConfig) || config.mockUpdates),
+    Effect.map(
+      (appUpdateYmlConfig) =>
+        Option.isSome(appUpdateYmlConfig) || config.mockUpdates || forkUpdaterAvailable,
+    ),
   );
 
   const resolveDisabledReason = Effect.gen(function* () {
