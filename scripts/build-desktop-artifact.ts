@@ -2577,6 +2577,7 @@ export function isDesktopPreviewVersion(version: string): boolean {
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
+  if (isDesktopPersonalVersion(version)) return "personal";
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 

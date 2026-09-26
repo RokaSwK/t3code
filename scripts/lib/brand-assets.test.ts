@@ -80,6 +80,7 @@ describe("brand-assets", () => {
 
   it("maps package versions to web asset brands", () => {
     expect(resolveWebAssetBrandForPackageVersion("0.0.29")).toBe("production");
+    expect(resolveWebAssetBrandForPackageVersion("0.0.42-personal.20260926")).toBe("personal");
     expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("nightly");
     expect(resolveWebAssetBrandForPackageVersion("0.0.29-preview.20260723.882")).toBe("nightly");
   });

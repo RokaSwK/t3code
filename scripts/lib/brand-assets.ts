@@ -35,7 +35,7 @@ export const BRAND_ASSET_PATHS = {
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
 
-export type WebAssetBrand = "development" | "nightly" | "production";
+export type WebAssetBrand = "development" | "nightly" | "production" | "personal";
 
 export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;
 
@@ -46,6 +46,7 @@ export function resolveWebAssetBrandForChannel(channel: WebAssetChannel): WebAss
 }
 
 export function resolveWebAssetBrandForPackageVersion(version: string): WebAssetBrand {
+  if (/^[^-+]+-personal\.\d+$/.test(version)) return "personal";
   return /^[^-+]+-(?:nightly|preview)\./.test(version) ? "nightly" : "production";
 }
 
@@ -62,6 +63,12 @@ const WEB_ICON_TARGET_FILENAMES = {
 } as const;
 
 const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
+  personal: {
+    faviconIco: "assets/personal/personal-web-favicon.ico",
+    favicon16Png: "assets/personal/personal-web-favicon-16x16.png",
+    favicon32Png: "assets/personal/personal-web-favicon-32x32.png",
+    appleTouchIconPng: "assets/personal/personal-web-apple-touch-180.png",
+  },
   development: {
     faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
