@@ -114,8 +114,8 @@ jobs:
             printf 'Manual download for Apple Silicon. Unzip and replace T3 Code.app. Automatic installation is disabled until signing is configured.\n' >> "$notes"
           fi
           printf '\nStable, Nightly, and Personal use separate data profiles. Personal preserves the existing ~/.t3-personal profile.\n' >> "$notes"
-          prerelease=()
-          [ "$TRACK" = stable ] || prerelease+=(--prerelease)
+          prerelease=(--prerelease=false)
+          [ "$TRACK" = stable ] || prerelease=(--prerelease)
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "T3 Code — $TRACK" --notes-file "$notes"
           else
