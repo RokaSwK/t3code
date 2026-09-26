@@ -88,13 +88,14 @@ const INTERACTIVE_MAX_WAIT_MS = 10_000;
 /** The member directory changes rarely; the owner picker reuses it this long. */
 const MEMBERS_TTL_MS = 10 * 60_000;
 const MEMBERS_MAX_PAGES = 5;
+// A missing scope is not in this set on purpose: a token from before a scope was added still
+// works for everything else, and one refused call must not end the sign-in.
 const AUTH_ERRORS = new Set([
   "invalid_auth",
   "not_authed",
   "token_revoked",
   "token_expired",
   "account_inactive",
-  "missing_scope",
 ]);
 
 const StoredConnection = Schema.Struct({

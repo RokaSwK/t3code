@@ -18,14 +18,19 @@ import { Effect, Schema } from "effect";
 export const SLACK_OAUTH_LOOPBACK_PORT = 38117;
 export const SLACK_OAUTH_REDIRECT_URI = `http://localhost:${SLACK_OAUTH_LOOPBACK_PORT}/slack/callback`;
 
-/** Read channels and messages, resolve people and custom emoji, read and write reactions. */
+/**
+ * Read channels, group messages, and direct messages, resolve people and custom emoji, and
+ * read and write reactions. Direct messages are read only for followed threads.
+ */
 export const SLACK_USER_SCOPES = [
   "channels:read",
   "groups:read",
   "mpim:read",
+  "im:read",
   "channels:history",
   "groups:history",
   "mpim:history",
+  "im:history",
   "users:read",
   "emoji:read",
   "reactions:read",
