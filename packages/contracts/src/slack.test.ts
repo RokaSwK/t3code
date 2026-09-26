@@ -25,6 +25,15 @@ describe("Slack thread links", () => {
     expect(parseSlackThreadUrl(url)).toBeNull();
     expect(() => decode([url])).toThrow();
   });
+  it.each(["C123", "D123", "G123"])(
+    "accepts channel and direct-message conversation %s",
+    (channelId) => {
+      expect(
+        parseSlackThreadUrl(`https://acme.slack.com/archives/${channelId}/p1790000000000001`)
+          ?.channelId,
+      ).toBe(channelId);
+    },
+  );
   it("limits the number of persisted links", () => {
     expect(() =>
       decode(Array(21).fill("https://acme.slack.com/archives/C1/p1790000000000000")),

@@ -180,7 +180,7 @@ export function parseSlackThreadUrl(value: string) {
       url.port
     )
       return null;
-    const match = /^\/archives\/([CG][A-Z0-9]+)\/p(\d{10,})(\d{6})\/?$/.exec(url.pathname);
+    const match = /^\/archives\/([CDG][A-Z0-9]+)\/p(\d{10,})(\d{6})\/?$/.exec(url.pathname);
     if (!match) return null;
     const ts = url.searchParams.get("thread_ts") ?? `${match[2]}.${match[3]}`;
     if (!/^\d{10,}\.\d{6}$/.test(ts)) return null;
