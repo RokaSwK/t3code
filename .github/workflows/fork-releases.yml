@@ -1,0 +1,128 @@
+name: Fork desktop releases
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Track to build
+        type: choice
+        options: [all, personal, stable, nightly]
+        default: all
+      signed:
+        description: Sign and enable automatic updates (requires Apple signing secrets)
+        type: boolean
+        default: false
+  push:
+    branches: [personal, release/stable, release/nightly]
+    paths-ignore: ["docs/**", "**/*.md"]
+
+permissions:
+  contents: write
+
+jobs:
+  tracks:
+    runs-on: ubuntu-latest
+    outputs:
+      tracks: ${{ steps.select.outputs.tracks }}
+    steps:
+      - id: select
+        env:
+          REQUESTED: ${{ inputs.channel }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          case "${REQUESTED:-$BRANCH}" in
+            all) echo 'tracks=["stable","nightly","personal"]' >> "$GITHUB_OUTPUT" ;;
+            stable|release/stable) echo 'tracks=["stable"]' >> "$GITHUB_OUTPUT" ;;
+            nightly|release/nightly) echo 'tracks=["nightly"]' >> "$GITHUB_OUTPUT" ;;
+            personal) echo 'tracks=["personal"]' >> "$GITHUB_OUTPUT" ;;
+            *) exit 1 ;;
+          esac
+
+  release:
+    needs: tracks
+    strategy:
+      fail-fast: false
+      matrix:
+        track: ${{ fromJSON(needs.tracks.outputs.tracks) }}
+    concurrency:
+      group: fork-release-${{ matrix.track }}
+      cancel-in-progress: false
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout release source
+        env:
+          SOURCE_REF: ${{ matrix.track == 'personal' && 'personal' || format('release/{0}', matrix.track) }}
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$SOURCE_REF"
+          git sparse-checkout set --no-cone '/*' '!/.repos/'
+          git checkout --detach FETCH_HEAD
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          run-install: false
+      - run: vp i --frozen-lockfile
+      - name: Check channel behavior
+        run: vp test run packages/shared/src/desktopReleaseChannels.test.ts apps/desktop/src/updates/updateChannels.test.ts
+      - name: Build
+        env:
+          TRACK: ${{ matrix.track }}
+          SIGNED: ${{ (inputs.signed || vars.FORK_SIGNED_RELEASES == 'true') && 'true' || 'false' }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          MACOS_PROVISIONING_PROFILE: ${{ secrets.MACOS_PROVISIONING_PROFILE }}
+        run: |
+          set -euo pipefail
+          base=$(node -p "require('./apps/desktop/package.json').version.split('-')[0]")
+          version="$base-fork.$TRACK.$(date -u +%Y%m%d%H%M%S)"
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          args=(--platform mac --target zip --arch arm64 --build-version "$version" --output-dir release/fork)
+          if [ "$SIGNED" = true ]; then
+            test -n "$CSC_LINK" && test -n "$CSC_KEY_PASSWORD" && test -n "$APPLE_API_KEY" && test -n "$APPLE_API_KEY_ID" && test -n "$APPLE_API_ISSUER"
+            args+=(--signed)
+          fi
+          node scripts/build-desktop-artifact.ts "${args[@]}"
+          if [ "$SIGNED" != true ]; then
+            archive=$(find release/fork -maxdepth 1 -name '*.zip' -print -quit)
+            ditto -x -k "$archive" "$RUNNER_TEMP/fork-app"
+            codesign --force --deep --sign - --preserve-metadata=entitlements,requirements,flags,runtime "$RUNNER_TEMP/fork-app/T3 Code.app"
+            codesign --verify --deep --strict "$RUNNER_TEMP/fork-app/T3 Code.app"
+            rm "$archive"
+            ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/fork-app/T3 Code.app" "$archive"
+            # Repacking invalidates blockmaps. Unsigned releases never expose updater manifests.
+            find release/fork -maxdepth 1 \( -name '*.blockmap' -o -name '*-mac.yml' \) -delete
+          fi
+      - name: Publish this track
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRACK: ${{ matrix.track }}
+          SIGNED: ${{ (inputs.signed || vars.FORK_SIGNED_RELEASES == 'true') && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          tag="desktop-$TRACK"
+          notes="$RUNNER_TEMP/release-notes.md"
+          printf 'Version: `%s`\n\nSource: `%s`\n\n' "$RELEASE_VERSION" "$(git rev-parse HEAD)" > "$notes"
+          if [ "$SIGNED" = true ]; then
+            printf 'Signed release. Select this track in Settings → About → Update track.\n' >> "$notes"
+          else
+            printf 'Manual download for Apple Silicon. Unzip and replace T3 Code.app. Automatic installation is disabled until signing is configured.\n' >> "$notes"
+          fi
+          printf '\nStable, Nightly, and Personal use separate data profiles. Personal preserves the existing ~/.t3-personal profile.\n' >> "$notes"
+          prerelease=()
+          [ "$TRACK" = stable ] || prerelease+=(--prerelease)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "T3 Code — $TRACK" --notes-file "$notes"
+          else
+            gh release create "$tag" --target "$(git rev-parse HEAD)" --title "T3 Code — $TRACK" --notes-file "$notes" "${prerelease[@]}" --latest=false
+          fi
+          files=(release/fork/*.zip)
+          if [ "$SIGNED" = true ]; then
+            files+=(release/fork/*-mac.yml release/fork/*.blockmap)
+          fi
+          gh release upload "$tag" "${files[@]}" --clobber

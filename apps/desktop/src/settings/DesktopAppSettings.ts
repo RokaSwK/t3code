@@ -1,3 +1,4 @@
+import { forkDesktopChannel } from "@t3tools/shared/desktopReleaseChannels";
 import {
   DesktopServerExposureModeSchema,
   DesktopUpdateChannelSchema,
@@ -238,9 +239,12 @@ function normalizeDesktopSettingsDocument(
       parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
     tailscaleServeEnabled: parsed.tailscaleServeEnabled === true,
     tailscaleServePort: normalizeTailscaleServePort(parsed.tailscaleServePort),
-    updateChannel: updateChannelConfiguredByUser
-      ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
-      : defaultSettings.updateChannel,
+    // A returned-to profile must follow the installed build, not its previous departure track.
+    updateChannel:
+      forkDesktopChannel(appVersion) ??
+      (updateChannelConfiguredByUser
+        ? Option.getOrElse(parsedUpdateChannel, () => defaultSettings.updateChannel)
+        : defaultSettings.updateChannel),
     updateChannelConfiguredByUser,
     wslBackendEnabled,
     wslDistro: normalizeWslDistro(parsed.wslDistro),

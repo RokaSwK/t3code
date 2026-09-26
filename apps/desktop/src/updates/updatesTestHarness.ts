@@ -22,6 +22,8 @@ import * as DesktopUpdates from "./DesktopUpdates.ts";
 export const flushCallbacks = Effect.yieldNow;
 
 export interface UpdatesHarnessOptions {
+  readonly appVersion?: string;
+  readonly appUpdateYml?: string;
   readonly checkForUpdates?: Effect.Effect<
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
@@ -152,7 +154,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     homeDirectory: `/tmp/t3-desktop-updates-home-${process.pid}`,
     platform: options.platform ?? "darwin",
     processArch: "x64",
-    appVersion: "1.2.3",
+    appVersion: options.appVersion ?? "1.2.3",
     appPath: "/repo",
     isPackaged: true,
     resourcesPath: "/missing/resources",
@@ -213,16 +215,18 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   const updateRestartMarkers = new Set<string>();
   const fileSystemLayer = FileSystem.layerNoop({
     readFileString: (path) =>
-      path === "/missing/resources/package-type" && options.packageType !== undefined
-        ? Effect.succeed(options.packageType)
-        : Effect.fail(
-            PlatformError.systemError({
-              module: "FileSystem",
-              method: "readFileString",
-              _tag: "NotFound",
-              pathOrDescriptor: path,
-            }),
-          ),
+      path === "/missing/resources/app-update.yml" && options.appUpdateYml !== undefined
+        ? Effect.succeed(options.appUpdateYml)
+        : path === "/missing/resources/package-type" && options.packageType !== undefined
+          ? Effect.succeed(options.packageType)
+          : Effect.fail(
+              PlatformError.systemError({
+                module: "FileSystem",
+                method: "readFileString",
+                _tag: "NotFound",
+                pathOrDescriptor: path,
+              }),
+            ),
     makeDirectory: () => Effect.void,
     writeFileString: (path) =>
       Effect.sync(() => {

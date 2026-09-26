@@ -1,3 +1,4 @@
+import { forkDesktopChannel } from "../../packages/shared/src/desktopReleaseChannels.ts";
 export const BRAND_ASSET_PATHS = {
   developmentIconComposerProject: "assets/dev/app-icon.icon",
   developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",
@@ -23,6 +24,10 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
 
+  // The dev blueprint recolored red, for personal fork builds (`-personal.` versions).
+  personalMacIconPng: "assets/personal/personal-macos-1024.png",
+  personalLinuxIconPng: "assets/personal/personal-universal-1024.png",
+
   developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
   developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
   developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
@@ -31,7 +36,7 @@ export const BRAND_ASSET_PATHS = {
   developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
 } as const;
 
-export type WebAssetBrand = "development" | "nightly" | "production";
+export type WebAssetBrand = "development" | "nightly" | "production" | "personal";
 
 export const WEB_ASSET_CHANNELS = ["latest", "nightly"] as const;
 
@@ -42,6 +47,9 @@ export function resolveWebAssetBrandForChannel(channel: WebAssetChannel): WebAss
 }
 
 export function resolveWebAssetBrandForPackageVersion(version: string): WebAssetBrand {
+  const forkChannel = forkDesktopChannel(version);
+  if (forkChannel) return forkChannel === "latest" ? "production" : forkChannel;
+  if (/^[^-+]+-personal\.\d+$/.test(version)) return "personal";
   return /^[^-+]+-(?:nightly|preview)\./.test(version) ? "nightly" : "production";
 }
 
@@ -58,6 +66,12 @@ const WEB_ICON_TARGET_FILENAMES = {
 } as const;
 
 const WEB_ICON_SOURCE_PATHS_BY_BRAND = {
+  personal: {
+    faviconIco: "assets/personal/personal-web-favicon.ico",
+    favicon16Png: "assets/personal/personal-web-favicon-16x16.png",
+    favicon32Png: "assets/personal/personal-web-favicon-32x32.png",
+    appleTouchIconPng: "assets/personal/personal-web-apple-touch-180.png",
+  },
   development: {
     faviconIco: BRAND_ASSET_PATHS.developmentWebFaviconIco,
     favicon16Png: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
