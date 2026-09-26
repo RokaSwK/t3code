@@ -126,9 +126,9 @@ jobs:
             files+=(release/fork/*-mac.yml release/fork/*.blockmap)
           fi
           gh release upload "$tag" "${files[@]}" --clobber
-          # The in-app updater installs the newest archive it finds; older ones only add noise.
-          for asset in $(gh release view "$tag" --json assets --jq '.assets[].name'); do
-            case "$asset" in
-              *.zip) [ "$asset" = "$(basename "${files[0]}")" ] || gh release delete-asset "$tag" "$asset" --yes ;;
-            esac
+          # The in-app updater installs the newest archive it finds. The previous one stays so
+          # a download that started from an earlier check still resolves; older ones go.
+          keep=$(gh release view "$tag" --json assets --jq '[.assets[].name | select(endswith(".zip"))] | sort | reverse | .[0:2] | .[]')
+          for asset in $(gh release view "$tag" --json assets --jq '.assets[].name | select(endswith(".zip"))'); do
+            printf '%s\n' "$keep" | grep -qx "$asset" || gh release delete-asset "$tag" "$asset" --yes
           done

@@ -11,7 +11,7 @@
  * @module ForkUpdater
  */
 // @effect-diagnostics nodeBuiltinImport:off - the swap is a child process on the local disk.
-// @effect-diagnostics globalFetchInEffect:off - streams a release archive to disk with progress.
+// @effect-diagnostics globalFetchInEffect:off globalFetch:off - streams a release archive to disk with progress.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
@@ -79,45 +79,54 @@ export const make = Effect.gen(function* () {
   let available: Available | undefined;
   let downloaded: { readonly version: string; readonly archive: string } | undefined;
 
+  /** The track's release right now; the newest archive for this machine, if it is not ours. */
+  const resolveRelease = async () => {
+    const response = await fetch(forkDesktopReleaseApiUrl(channel), {
+      headers: {
+        accept: "application/vnd.github+json",
+        "user-agent": `t3-code-desktop/${appVersion}`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(
+        `GitHub returned ${response.status} for release ${forkDesktopReleaseTag(channel)}.`,
+      );
+    }
+    const release = (await response.json()) as {
+      readonly body?: string;
+      readonly assets?: ReadonlyArray<ReleaseAsset>;
+    };
+    const asset = pickForkDesktopAsset(release.assets ?? [], arch);
+    // A track's newest build is the target even when it is older than the running one, so
+    // switching tracks works; the running build itself is never reinstalled.
+    return {
+      notes: release.body ?? null,
+      available:
+        asset && asset.version !== appVersion ? { version: asset.version, asset } : undefined,
+    };
+  };
+
   const checkForUpdates = Effect.tryPromise({
     try: async () => {
       events.emit("checking-for-update");
-      const response = await fetch(forkDesktopReleaseApiUrl(channel), {
-        headers: {
-          accept: "application/vnd.github+json",
-          "user-agent": `t3-code-desktop/${appVersion}`,
-        },
-      });
-      if (!response.ok) {
-        throw new Error(
-          `GitHub returned ${response.status} for release ${forkDesktopReleaseTag(channel)}.`,
-        );
-      }
-      const release = (await response.json()) as {
-        readonly body?: string;
-        readonly assets?: ReadonlyArray<ReleaseAsset>;
-      };
-      const asset = pickForkDesktopAsset(release.assets ?? [], arch);
-      // A track's newest build is the target even when it is older than the running one, so
-      // switching tracks works; the running build itself is never reinstalled.
-      if (!asset || asset.version === appVersion) {
-        available = undefined;
+      const release = await resolveRelease();
+      available = release.available;
+      if (!available) {
         events.emit("update-not-available", { version: appVersion });
         return;
       }
-      available = { version: asset.version, asset };
-      events.emit("update-available", {
-        version: asset.version,
-        releaseNotes: release.body ?? null,
-      });
+      events.emit("update-available", { version: available.version, releaseNotes: release.notes });
     },
     catch: (cause) => new ElectronUpdaterCheckForUpdatesError({ channel, cause }),
   }).pipe(Effect.tapError((error) => logFailure("check", error.cause)));
 
   const downloadUpdate = Effect.tryPromise({
     try: async () => {
-      const target = available;
-      if (!target) throw new Error("No update is available to download.");
+      if (!available) throw new Error("No update is available to download.");
+      // The release only keeps its newest archive, so a build announced by an earlier check
+      // may be gone by now. Download whatever is newest at this moment.
+      const target = (await resolveRelease()).available ?? available;
+      available = target;
       await Effect.runPromise(logInfo("downloading release archive", { name: target.asset.name }));
       // Node's recursive rm fails with ENOTEMPTY on a large bundle here; leftovers from the
       // last swap (previous.app) are scratch, so a plain rm -rf is the right tool.
