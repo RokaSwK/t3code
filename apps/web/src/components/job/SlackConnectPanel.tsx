@@ -10,7 +10,7 @@ import { readLocalApi } from "~/localApi";
 import { slackEnvironment } from "~/state/slack";
 import { useAtomCommand } from "~/state/use-atom-command";
 
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Input } from "../ui/input";
 
 const CLIENT_ID_PATTERN = /^\d+\.\d+$/;
@@ -33,6 +33,7 @@ export function SlackConnectPanel({
   });
   const cancelConnect = useAtomCommand(slackEnvironment.cancelConnect);
   const [clientId, setClientId] = useState(connection.clientId ?? "");
+  const [showSetup, setShowSetup] = useState(false);
   const [callbackUrl, setCallbackUrl] = useState("");
   const [pending, setPending] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -102,6 +103,44 @@ export function SlackConnectPanel({
   }
 
   const validClientId = CLIENT_ID_PATTERN.test(clientId.trim());
+  const startSignIn = () => {
+    if (!validClientId) return;
+    setPending(true);
+    setLocalError(null);
+    void connect({ environmentId, input: { clientId: clientId.trim() } })
+      .then((result) => {
+        if (result._tag === "Failure") {
+          setLocalError("Could not start Slack sign-in.");
+          return;
+        }
+        if (result.value.status === "authorizing") {
+          openExternal(result.value.authorizeUrl);
+        }
+      })
+      .finally(() => setPending(false));
+  };
+  // The server remembers the app; a sign-out or a lost token only needs the one click.
+  if (connection.clientId && !showSetup) {
+    return (
+      <section className="flex flex-col gap-4 rounded-xl border bg-card p-5 text-card-foreground">
+        <div className="flex flex-col gap-1">
+          <h2 className="text-sm font-medium">Connect Slack</h2>
+          <p className="text-sm text-muted-foreground">
+            Sign in again to follow threads and assign owners. Your Slack app is remembered.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" disabled={pending} onClick={startSignIn}>
+            Sign in with Slack
+          </Button>
+          <InlineButton tone="muted" onClick={() => setShowSetup(true)}>
+            Use a different Slack app
+          </InlineButton>
+        </div>
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      </section>
+    );
+  }
   return (
     <section className="flex flex-col gap-5 rounded-xl border bg-card p-5 text-card-foreground">
       <div className="flex flex-col gap-1">
@@ -132,20 +171,7 @@ export function SlackConnectPanel({
             className="flex gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!validClientId) return;
-              setPending(true);
-              setLocalError(null);
-              void connect({ environmentId, input: { clientId: clientId.trim() } })
-                .then((result) => {
-                  if (result._tag === "Failure") {
-                    setLocalError("Could not start Slack sign-in.");
-                    return;
-                  }
-                  if (result.value.status === "authorizing") {
-                    openExternal(result.value.authorizeUrl);
-                  }
-                })
-                .finally(() => setPending(false));
+              startSignIn();
             }}
           >
             <Input

@@ -80,6 +80,8 @@ import { slackMentionedUserIds, slackMrkdwnToMarkdown, standardEmoji } from "./s
 import { SlackRateLimiter, type SlackCallPriority } from "./slackRateLimiter.ts";
 
 const CONNECTION_SECRET = "slack-connection";
+/** The app last signed in with, kept across sign-outs so reconnecting is one click. */
+const CLIENT_ID_SECRET = "slack-client-id";
 const AUTHORIZATION_TIMEOUT = Duration.minutes(10);
 /** Snapshots go out at most this often while channels sync. */
 const PUBLISH_INTERVAL_MS = 2_000;
@@ -883,6 +885,9 @@ const make = Effect.gen(function* () {
       authorization = pending;
       lastClientId = input.clientId;
       connectionError = undefined;
+      yield* secrets
+        .set(CLIENT_ID_SECRET, new TextEncoder().encode(input.clientId))
+        .pipe(Effect.ignore);
       // Another app may hold the port; pasting the redirect URL still works then.
       const listening = yield* Effect.exit(startLoopback(scope));
       if (Exit.isFailure(listening)) {
@@ -1084,12 +1089,17 @@ const make = Effect.gen(function* () {
     Effect.map(Option.flatMap((bytes) => decodeStoredConnection(new TextDecoder().decode(bytes)))),
     Effect.orElseSucceed(() => Option.none<StoredConnection>()),
   );
+  const storedClientId = yield* secrets.get(CLIENT_ID_SECRET).pipe(
+    Effect.map(Option.map((bytes) => new TextDecoder().decode(bytes).trim())),
+    Effect.orElseSucceed(() => Option.none<string>()),
+  );
+  if (Option.isSome(storedClientId) && storedClientId.value) lastClientId = storedClientId.value;
   if (Option.isSome(stored)) {
     connection = stored.value;
     lastClientId = stored.value.clientId;
     yield* startSync;
-    yield* publish;
   }
+  yield* publish;
 
   return SlackService.of({
     state: SubscriptionRef.changes(stateRef),

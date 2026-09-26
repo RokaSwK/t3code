@@ -150,8 +150,7 @@ function fakeSlack(calls: Array<SlackCall>, rateLimited: Set<string>) {
   );
 }
 
-function memorySecrets() {
-  const store = new Map<string, Uint8Array>();
+function memorySecrets(store = new Map<string, Uint8Array>()) {
   return Layer.mock(ServerSecretStore.ServerSecretStore)({
     get: (name) => Effect.succeed(Option.fromNullishOr(store.get(name))),
     set: (name, value) => Effect.sync(() => void store.set(name, value)),
@@ -170,6 +169,7 @@ describe("SlackService", () => {
   it.live("signs in with PKCE, follows new threads, and reacts", () => {
     const calls: Array<SlackCall> = [];
     const rateLimited = new Set<string>();
+    const secrets = new Map<string, Uint8Array>();
     return Effect.gen(function* () {
       const slack = yield* SlackService.SlackService;
       const authorizing = yield* slack.connect({ clientId: "123.456" });
@@ -291,12 +291,31 @@ describe("SlackService", () => {
       );
       assert.deepStrictEqual(disconnected.threads, []);
       assert.strictEqual(calls.at(-1)?.method, "auth.revoke");
+      // The app is remembered past sign-out, and past a restart.
+      assert.strictEqual(disconnected.connection.clientId, "123.456");
+      assert.isFalse(secrets.has("slack-connection"));
+      assert.isTrue(secrets.has("slack-client-id"));
     }).pipe(
       Effect.provide(
         SlackService.layer.pipe(
           Layer.provide(fakeSlack(calls, rateLimited)),
-          Layer.provide(memorySecrets()),
+          Layer.provide(memorySecrets(secrets)),
           Layer.provide(NodeServices.layer),
+        ),
+      ),
+      Effect.andThen(
+        Effect.gen(function* () {
+          const slack = yield* SlackService.SlackService;
+          const state = yield* slack.state.pipe(Stream.runHead);
+          assert.strictEqual(Option.getOrThrow(state).connection.clientId, "123.456");
+        }).pipe(
+          Effect.provide(
+            SlackService.layer.pipe(
+              Layer.provide(fakeSlack(calls, rateLimited)),
+              Layer.provide(memorySecrets(secrets)),
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
         ),
       ),
     );
