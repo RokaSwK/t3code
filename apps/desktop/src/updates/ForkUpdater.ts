@@ -27,6 +27,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Electron from "electron";
 
+import * as DesktopObservability from "../app/DesktopObservability.ts";
 import {
   ElectronUpdater,
   ElectronUpdaterCheckForUpdatesError,
@@ -49,6 +50,14 @@ interface Available {
 }
 
 const BUNDLE_NAME = "T3 Code.app";
+
+const { logInfo, logError } = DesktopObservability.makeComponentLogger("fork-updater");
+
+/** The updater's wrapped errors hide their cause from the UI; the log keeps ours, which are safe. */
+const logFailure = (operation: string, cause: unknown) =>
+  logError(`fork updater ${operation} failed`, {
+    cause: cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause),
+  });
 
 function run(command: string, args: ReadonlyArray<string>): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -103,12 +112,13 @@ export const make = Effect.gen(function* () {
       });
     },
     catch: (cause) => new ElectronUpdaterCheckForUpdatesError({ channel, cause }),
-  });
+  }).pipe(Effect.tapError((error) => logFailure("check", error.cause)));
 
   const downloadUpdate = Effect.tryPromise({
     try: async () => {
       const target = available;
       if (!target) throw new Error("No update is available to download.");
+      await Effect.runPromise(logInfo("downloading release archive", { name: target.asset.name }));
       await NodeFS.promises.rm(staging, { recursive: true, force: true });
       await NodeFS.promises.mkdir(staging, { recursive: true });
       const archive = NodePath.join(staging, target.asset.name);
@@ -145,7 +155,7 @@ export const make = Effect.gen(function* () {
       events.emit("update-downloaded", { version: target.version });
     },
     catch: (cause) => new ElectronUpdaterDownloadUpdateError({ channel, cause }),
-  });
+  }).pipe(Effect.tapError((error) => logFailure("download", error.cause)));
 
   const quitAndInstall = ({
     isSilent,
@@ -188,7 +198,7 @@ export const make = Effect.gen(function* () {
       },
       catch: (cause) =>
         new ElectronUpdaterQuitAndInstallError({ channel, isSilent, isForceRunAfter, cause }),
-    });
+    }).pipe(Effect.tapError((error) => logFailure("install", error.cause)));
 
   return ElectronUpdater.of({
     // The release is addressed by channel; feed URLs are electron-updater's concern.
