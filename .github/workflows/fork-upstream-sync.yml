@@ -1,0 +1,122 @@
+name: Fork upstream sync
+
+# Keeps the fork's tracks on upstream's newest releases without anyone merging by hand:
+# release/stable follows upstream's latest stable release, release/nightly and personal
+# follow the latest nightly. A clean merge that passes focused checks is pushed and the
+# track is rebuilt; anything else becomes an issue for a human to resolve.
+
+on:
+  schedule:
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Track to sync
+        type: choice
+        options: [all, personal, nightly, stable]
+        default: all
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: fork-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: pingdotgg/t3code
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: personal
+          fetch-depth: 0
+          filter: blob:none
+      - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          run-install: false
+      - name: Resolve upstream releases
+        id: upstream
+        run: |
+          set -euo pipefail
+          stable=$(gh release list --repo "$UPSTREAM" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')
+          nightly=$(gh release list --repo "$UPSTREAM" --exclude-drafts --limit 40 --json tagName --jq '[.[] | select(.tagName | test("-nightly\\."))][0].tagName')
+          test -n "$stable" && test -n "$nightly"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "nightly=$nightly" >> "$GITHUB_OUTPUT"
+          git remote add upstream "https://github.com/$UPSTREAM.git"
+          git fetch --no-tags upstream "refs/tags/$stable:refs/tags/$stable" "refs/tags/$nightly:refs/tags/$nightly"
+          git config user.name "fork-sync[bot]"
+          git config user.email "fork-sync@users.noreply.github.com"
+      - name: Merge, check, push, and rebuild each track
+        env:
+          REQUESTED: ${{ inputs.track || 'all' }}
+          STABLE_TAG: ${{ steps.upstream.outputs.stable }}
+          NIGHTLY_TAG: ${{ steps.upstream.outputs.nightly }}
+        run: |
+          set -uo pipefail
+          # An open issue per branch and tag; re-runs do not pile up duplicates.
+          report() {
+            local branch=$1 tag=$2 reason=$3 detail=$4
+            local title="Upstream merge needs attention: $branch ← $tag"
+            if [ -z "$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')" ]; then
+              printf '%s\n\n```\n%s\n```\n\nRun: %s/%s/actions/runs/%s\n' "$reason" "$detail" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+                | gh issue create --title "$title" --label "upstream-sync" --body-file - >/dev/null || \
+                printf '%s\n\n```\n%s\n```\n' "$reason" "$detail" | gh issue create --title "$title" --body-file - >/dev/null
+            fi
+            echo "::warning::$title: $reason"
+          }
+          checks() {
+            local track=$1
+            vp i || return 1
+            vp test run packages/shared/src/desktopReleaseChannels.test.ts apps/desktop/src/updates || return 1
+            if [ "$track" = personal ]; then
+              vp test run apps/server/src/slack packages/contracts/src/slack.test.ts || return 1
+            fi
+            (cd apps/desktop && npx tsc --noEmit) || return 1
+            (cd apps/server && npx tsc --noEmit) || return 1
+          }
+          failed=0
+          for track in stable nightly personal; do
+            case "$REQUESTED" in all|"$track") ;; *) continue ;; esac
+            case "$track" in
+              stable) branch=release/stable; tag=$STABLE_TAG ;;
+              nightly) branch=release/nightly; tag=$NIGHTLY_TAG ;;
+              personal) branch=personal; tag=$NIGHTLY_TAG ;;
+            esac
+            echo "::group::$track ($branch ← $tag)"
+            git checkout -q -B "$branch" "origin/$branch"
+            if git merge-base --is-ancestor "$tag" "$branch"; then
+              echo "$branch already contains $tag"
+              echo "::endgroup::"
+              continue
+            fi
+            if ! git merge --no-edit -m "chore(fork): merge upstream $tag into $branch" "$tag"; then
+              conflicts=$(git diff --name-only --diff-filter=U)
+              git merge --abort
+              report "$branch" "$tag" "The merge has conflicts. Merge $tag into $branch by hand." "$conflicts"
+              failed=1
+              echo "::endgroup::"
+              continue
+            fi
+            if ! output=$(checks "$track" 2>&1); then
+              git reset -q --hard "origin/$branch"
+              report "$branch" "$tag" "The merge is clean but focused checks fail." "$(printf '%s' "$output" | tail -c 6000)"
+              failed=1
+              echo "::endgroup::"
+              continue
+            fi
+            git push origin "$branch"
+            # Pushes made with the workflow token do not trigger push workflows; dispatch explicitly.
+            gh workflow run fork-releases.yml -f channel="$track"
+            echo "merged $tag into $branch and dispatched the $track release"
+            echo "::endgroup::"
+          done
+          exit $failed
