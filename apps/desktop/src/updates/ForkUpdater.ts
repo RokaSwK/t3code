@@ -119,7 +119,9 @@ export const make = Effect.gen(function* () {
       const target = available;
       if (!target) throw new Error("No update is available to download.");
       await Effect.runPromise(logInfo("downloading release archive", { name: target.asset.name }));
-      await NodeFS.promises.rm(staging, { recursive: true, force: true });
+      // Node's recursive rm fails with ENOTEMPTY on a large bundle here; leftovers from the
+      // last swap (previous.app) are scratch, so a plain rm -rf is the right tool.
+      await run("/bin/rm", ["-rf", staging]);
       await NodeFS.promises.mkdir(staging, { recursive: true });
       const archive = NodePath.join(staging, target.asset.name);
       const response = await fetch(target.asset.browser_download_url, {
@@ -173,7 +175,7 @@ export const make = Effect.gen(function* () {
         // A swap that cannot write next to the bundle must fail here, while it can be shown.
         await NodeFS.promises.access(NodePath.dirname(appBundle), NodeFS.constants.W_OK);
         const extracted = NodePath.join(staging, "extracted");
-        await NodeFS.promises.rm(extracted, { recursive: true, force: true });
+        await run("/bin/rm", ["-rf", extracted]);
         await run("/usr/bin/ditto", ["-x", "-k", ready.archive, extracted]);
         const newBundle = NodePath.join(extracted, BUNDLE_NAME);
         await NodeFS.promises.access(newBundle);
