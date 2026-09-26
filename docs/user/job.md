@@ -1,7 +1,15 @@
-# Job
+# Work
 
-Open **Job** from the sidebar or the command palette. It shows the Slack threads you follow and
-new threads from the channels you are in, and it is where work starts from Slack.
+On web or desktop, open **Work** from the sidebar or the command palette. **Linked work** brings your T3 threads,
+their linked pull requests, and linked Slack conversations together across connected environments.
+Use **Needs me** for agent questions, approvals, errors, failing PR checks, merge conflicts, and
+requested changes. **In progress**, **Waiting**, and **Done** show the other work; choose a thread,
+PR, or Slack link to continue in its source. PR status includes the time it last synced.
+Link a PR from a T3 thread using **Link pull request** in the command palette; created PRs link
+automatically.
+
+The **Slack inbox** below shows threads you follow and new threads from channels you are in. It is
+where you can start work from Slack. Slack follow and dismiss actions stay in that inbox.
 
 ## Connect Slack
 
@@ -16,7 +24,7 @@ the token stays on your T3 Code server.
 If your browser is not on the same machine as the T3 Code server, Slack's final page will not load
 after you approve. Copy that page's full address and paste it into T3 Code to finish.
 
-Disconnect from the **…** menu on the Job page. Disconnecting also revokes the token in Slack.
+Disconnect from the **…** menu on the Work page. Disconnecting also revokes the token in Slack.
 
 ## What you see
 
@@ -34,10 +42,10 @@ to hide one new thread, and **Show dismissed** to restore it.
 ## Follow threads with 👀
 
 React to a Slack message with 👀, from T3 Code or from Slack itself, and its thread appears under
-**Following** at the top of the Job page. Following works anywhere in your workspace, including
+**Following** in the Slack inbox on the Work page. Following works anywhere in your workspace, including
 direct messages and threads older than the feed window, and it stays until you remove the
 reaction. Marking a reply follows its parent thread.
-Choose **Unfollow** on the Job page to remove your 👀 reactions from that conversation.
+Choose **Unfollow** on the Work page to remove your 👀 reactions from that conversation.
 
 Choose **Start thread** on a followed thread and pick the project folder to work in. The new
 thread opens as a draft; when you send the first message it is created already linked to the

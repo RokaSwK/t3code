@@ -24,6 +24,7 @@ import { SlackConnectPanel } from "./SlackConnectPanel";
 import { ChannelExclusionsDialog } from "./ChannelExclusionsDialog";
 import { SlackThreadItem } from "./SlackThreadItem";
 import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
+import { WorkOverview } from "./WorkOverview";
 
 function syncLabel(sync: SlackState["sync"]): string {
   if (sync.rateLimitedUntil) {
@@ -305,7 +306,7 @@ function JobFeed({
   );
 }
 
-/** Work that arrives from outside T3 Code: Slack threads you follow, and new ones. */
+/** Linked work and the Slack feed that can start new work. */
 export function JobPage() {
   useEscapeToGoBack();
   const environmentId = usePrimaryEnvironmentId();
@@ -316,9 +317,9 @@ export function JobPage() {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
         <WorkspacePageHeader electron={isElectron}>
-          <WorkspaceBreadcrumb ariaLabel="Job breadcrumb" className="min-w-0">
+          <WorkspaceBreadcrumb ariaLabel="Work breadcrumb" className="min-w-0">
             <WorkspaceBreadcrumbItem current>
-              <h1>Job</h1>
+              <h1>Work</h1>
             </WorkspaceBreadcrumbItem>
           </WorkspaceBreadcrumb>
           {environmentId && state ? (
@@ -327,6 +328,10 @@ export function JobPage() {
         </WorkspacePageHeader>
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="readable" className="gap-4">
+            <WorkOverview />
+            <div className="border-t border-border pt-4">
+              <h2 className="text-sm font-medium">Slack inbox</h2>
+            </div>
             {environmentId === null ? (
               <p className="text-sm text-muted-foreground">Connect to a T3 Code server first.</p>
             ) : state === null ? (

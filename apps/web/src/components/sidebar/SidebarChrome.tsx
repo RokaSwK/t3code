@@ -201,7 +201,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
-          <SidebarUtilityItem icon={<BriefcaseIcon />} label="Job" onClick={handleJobClick} />
+          <SidebarUtilityItem icon={<BriefcaseIcon />} label="Work" onClick={handleJobClick} />
         </>
       )}
       <SidebarUpdatePill />

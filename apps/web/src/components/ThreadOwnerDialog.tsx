@@ -172,7 +172,7 @@ function ThreadOwnerDialog({ threadRef }: { readonly threadRef: ScopedThreadRef 
             ) : null}
             {!connected ? (
               <p className="px-3 py-4 text-xs text-muted-foreground">
-                Connect Slack from the Job page to assign workspace members.
+                Connect Slack from the Work page to assign workspace members.
               </p>
             ) : members.status === "loading" ? (
               <p className="px-3 py-4 text-xs text-muted-foreground" role="status">
