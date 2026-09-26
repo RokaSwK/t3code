@@ -2580,7 +2580,31 @@ export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 
+/**
+ * Local builds of a personal fork (`<version>-personal.<stamp>`) install beside
+ * an official app: their own name, bundle id, red icon, and URL scheme, and no
+ * update feed that could replace them with an official release.
+ */
+export function isDesktopPersonalVersion(version: string): boolean {
+  return /^[^-+]+-personal\.\d+$/.test(version);
+}
+
+function resolveDesktopAppId(version: string): string {
+  return isDesktopPersonalVersion(version) ? `${DESKTOP_APP_ID}.personal` : DESKTOP_APP_ID;
+}
+
+function resolveDesktopUrlSchemes(version: string): string[] {
+  return isDesktopPersonalVersion(version) ? ["t3code-personal"] : ["t3code", "t3code-dev"];
+}
+
 export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+  if (isDesktopPersonalVersion(version)) {
+    return {
+      macIconPng: BRAND_ASSET_PATHS.personalMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.personalLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
+    };
+  }
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
@@ -2614,6 +2638,7 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(version: string): string {
+  if (isDesktopPersonalVersion(version)) return "T3 Code (Personal)";
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "T3 Code (Nightly)"
     : (desktopPackageJson.productName ?? "T3 Code");
@@ -2639,7 +2664,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   arch?: typeof BuildArch.Type,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
+    appId: resolveDesktopAppId(version),
     productName: resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
@@ -2669,7 +2694,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (!isDesktopPreviewVersion(version)) {
+  if (!isDesktopPreviewVersion(version) && !isDesktopPersonalVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];
@@ -2697,7 +2722,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: resolveDesktopUrlSchemes(version),
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
@@ -2751,7 +2776,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: resolveDesktopUrlSchemes(version),
         },
       ],
       desktop: {

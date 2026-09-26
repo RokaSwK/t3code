@@ -13,6 +13,11 @@ export function isNightlyDesktopVersion(version: string): boolean {
   return PRERELEASE_VERSION_PATTERN.test(version);
 }
 
+/** Local builds of a personal fork: their own app identity and data, and no update feed. */
+export function isPersonalDesktopVersion(version: string): boolean {
+  return /^[^-+]+-personal\.\d+$/.test(version);
+}
+
 export function resolveDefaultDesktopUpdateChannel(appVersion: string): DesktopUpdateChannel {
   return NIGHTLY_VERSION_PATTERN.test(appVersion) ? "nightly" : "latest";
 }

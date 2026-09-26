@@ -253,6 +253,16 @@ import {
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  SlackCompleteConnectInput,
+  SlackConnectInput,
+  SlackConnection,
+  SlackError,
+  SlackMessage,
+  SlackSetReactionInput,
+  SlackState,
+  SlackThreadRef,
+} from "./slack.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   ProjectCloneActionInput,
@@ -360,6 +370,15 @@ export const WS_METHODS = {
   deviceDetail: "device.detail",
   deviceAction: "device.action",
 
+  // Slack methods
+  slackConnect: "slack.connect",
+  slackCompleteConnect: "slack.completeConnect",
+  slackCancelConnect: "slack.cancelConnect",
+  slackDisconnect: "slack.disconnect",
+  slackRefresh: "slack.refresh",
+  slackGetReplies: "slack.getReplies",
+  slackSetReaction: "slack.setReaction",
+
   // Server meta
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
@@ -438,6 +457,7 @@ export const WS_METHODS = {
   subscribePreviewEvents: "subscribePreviewEvents",
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
   subscribeDeviceState: "subscribeDeviceState",
+  subscribeSlackState: "subscribeSlackState",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -1272,6 +1292,54 @@ const WsSubscribeDeviceStateRpc = Rpc.make(WS_METHODS.subscribeDeviceState, {
   stream: true,
 });
 
+/** Starts Slack sign-in; the returned connection carries the URL to open. */
+const WsSlackConnectRpc = Rpc.make(WS_METHODS.slackConnect, {
+  payload: SlackConnectInput,
+  success: SlackConnection,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+/** Finishes sign-in from a pasted redirect URL, for browsers not on the server's machine. */
+const WsSlackCompleteConnectRpc = Rpc.make(WS_METHODS.slackCompleteConnect, {
+  payload: SlackCompleteConnectInput,
+  success: SlackConnection,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsSlackCancelConnectRpc = Rpc.make(WS_METHODS.slackCancelConnect, {
+  payload: Schema.Struct({}),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsSlackDisconnectRpc = Rpc.make(WS_METHODS.slackDisconnect, {
+  payload: Schema.Struct({}),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+/** Reads every channel again as soon as the rate limits allow. */
+const WsSlackRefreshRpc = Rpc.make(WS_METHODS.slackRefresh, {
+  payload: Schema.Struct({}),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsSlackGetRepliesRpc = Rpc.make(WS_METHODS.slackGetReplies, {
+  payload: SlackThreadRef,
+  success: Schema.Array(SlackMessage),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsSlackSetReactionRpc = Rpc.make(WS_METHODS.slackSetReaction, {
+  payload: SlackSetReactionInput,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsSubscribeSlackStateRpc = Rpc.make(WS_METHODS.subscribeSlackState, {
+  payload: Schema.Struct({}),
+  success: SlackState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsOrchestrationDispatchCommandRpc = Rpc.make(ORCHESTRATION_WS_METHODS.dispatchCommand, {
   payload: ClientOrchestrationCommand,
   success: OrchestrationRpcSchemas.dispatchCommand.output,
@@ -1523,6 +1591,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceDetailRpc,
   WsDeviceActionRpc,
   WsSubscribeDeviceStateRpc,
+  WsSlackConnectRpc,
+  WsSlackCompleteConnectRpc,
+  WsSlackCancelConnectRpc,
+  WsSlackDisconnectRpc,
+  WsSlackRefreshRpc,
+  WsSlackGetRepliesRpc,
+  WsSlackSetReactionRpc,
+  WsSubscribeSlackStateRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

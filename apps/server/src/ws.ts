@@ -125,6 +125,7 @@ import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as SlackService from "./slack/SlackService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -559,6 +560,7 @@ const makeWsRpcLayer = (
       const terminalManager = yield* TerminalManager.TerminalManager;
       const previewManager = yield* PreviewManager.PreviewManager;
       const deviceService = yield* DeviceService.DeviceService;
+      const slackService = yield* SlackService.SlackService;
       const deviceHostContext =
         yield* Effect.context<Effect.Services<ReturnType<typeof remoteSshDeviceHosts>>>();
       const portDiscovery = yield* PortScanner.PortDiscovery;
@@ -3573,6 +3575,38 @@ const makeWsRpcLayer = (
             DeviceService.stateStream(deviceService),
             { "rpc.aggregate": "device" },
           ),
+        [WS_METHODS.slackConnect]: (input) =>
+          observeRpcEffect(WS_METHODS.slackConnect, slackService.connect(input), {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackCompleteConnect]: (input) =>
+          observeRpcEffect(WS_METHODS.slackCompleteConnect, slackService.completeConnect(input), {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackCancelConnect]: (_input) =>
+          observeRpcEffect(WS_METHODS.slackCancelConnect, slackService.cancelConnect, {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackDisconnect]: (_input) =>
+          observeRpcEffect(WS_METHODS.slackDisconnect, slackService.disconnect, {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackRefresh]: (_input) =>
+          observeRpcEffect(WS_METHODS.slackRefresh, slackService.refresh, {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackGetReplies]: (input) =>
+          observeRpcEffect(WS_METHODS.slackGetReplies, slackService.getReplies(input), {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackSetReaction]: (input) =>
+          observeRpcEffect(WS_METHODS.slackSetReaction, slackService.setReaction(input), {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.subscribeSlackState]: (_input) =>
+          observeRpcStream(WS_METHODS.subscribeSlackState, slackService.state, {
+            "rpc.aggregate": "slack",
+          }),
         [WS_METHODS.subscribeDiscoveredLocalServers]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeDiscoveredLocalServers,

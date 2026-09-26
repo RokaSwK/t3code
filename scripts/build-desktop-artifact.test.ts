@@ -272,6 +272,15 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
   });
 
+  it("gives personal fork builds their own name and red icon", () => {
+    assert.equal(resolveDesktopProductName("0.0.43-personal.20260926170000"), "T3 Code (Personal)");
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.43-personal.20260926170000"), {
+      macIconPng: BRAND_ASSET_PATHS.personalMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.personalLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
+    });
+  });
+
   it("switches the bundled splash and favicon branding for nightly versions", () => {
     assert.equal(resolveDesktopWebAssetBrand("0.0.17"), "production");
     assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42"), "nightly");

@@ -14,9 +14,11 @@ export function resolveDesktopBaseDir(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly t3Home: Option.Option<string>;
+  /** Personal builds keep their data apart from an official install on the same machine. */
+  readonly personal?: boolean;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, ".t3"),
+    input.joinPath(input.homeDirectory, input.personal ? ".t3-personal" : ".t3"),
   );
 }
 

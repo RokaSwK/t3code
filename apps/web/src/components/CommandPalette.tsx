@@ -42,6 +42,7 @@ import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
+  BriefcaseIcon,
   ChartNoAxesColumnIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
@@ -2036,6 +2037,17 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "usage.open",
     run: async () => {
       await navigate({ to: "/usage" });
+    },
+  });
+
+  actionItems.push({
+    kind: "action",
+    value: "action:job",
+    searchTerms: ["job", "slack", "threads", "messages", "inbox"],
+    title: "Open job",
+    icon: <BriefcaseIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/job" });
     },
   });
 

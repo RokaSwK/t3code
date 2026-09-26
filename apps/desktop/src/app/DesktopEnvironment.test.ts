@@ -40,6 +40,21 @@ const makeEnvironment = (
   DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect("keeps a personal build's identity and data apart from the official app", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        appVersion: "0.0.43-personal.20260926170000",
+        isPackaged: true,
+      });
+      assert.strictEqual(environment.baseDir, "/Users/alice/.t3-personal");
+      assert.strictEqual(environment.stateDir, "/Users/alice/.t3-personal/userdata");
+      assert.strictEqual(environment.displayName, "T3 Code (Personal)");
+      assert.strictEqual(environment.branding.stageLabel, "Personal");
+      assert.strictEqual(environment.userDataDirName, "t3code-personal");
+      assert.strictEqual(environment.appUserModelId, "com.t3tools.t3code.personal");
+    }),
+  );
+
   it.effect("derives state paths and development identity inside Effect", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(

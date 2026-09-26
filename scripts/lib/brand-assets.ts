@@ -23,6 +23,10 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
 
+  // The dev blueprint recolored red, for personal fork builds (`-personal.` versions).
+  personalMacIconPng: "assets/personal/personal-macos-1024.png",
+  personalLinuxIconPng: "assets/personal/personal-universal-1024.png",
+
   developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
   developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
   developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",

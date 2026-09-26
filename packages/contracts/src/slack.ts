@@ -1,0 +1,169 @@
+/**
+ * Slack - Schemas for the Job page's Slack connection.
+ *
+ * The environment server owns the Slack user token and polls the channels the
+ * user belongs to. Clients only see the rendered feed: root messages (threads)
+ * from the recent window, with authors, emoji, and mentions already resolved.
+ *
+ * Sign-in uses the user's own Slack app with PKCE and a loopback redirect, so
+ * no client secret or public URL is needed. When the browser is not on the
+ * server's machine the redirect cannot land, and the user pastes the final
+ * URL back instead.
+ *
+ * @module Slack
+ */
+import { Schema } from "effect";
+
+/** Registered in the Slack app manifest; Slack matches it exactly. */
+export const SLACK_OAUTH_LOOPBACK_PORT = 38117;
+export const SLACK_OAUTH_REDIRECT_URI = `http://localhost:${SLACK_OAUTH_LOOPBACK_PORT}/slack/callback`;
+
+/** Read channels and messages, resolve people and custom emoji, read and write reactions. */
+export const SLACK_USER_SCOPES = [
+  "channels:read",
+  "groups:read",
+  "mpim:read",
+  "channels:history",
+  "groups:history",
+  "mpim:history",
+  "users:read",
+  "emoji:read",
+  "reactions:read",
+  "reactions:write",
+] as const;
+
+/** The manifest the "Create Slack app" link prefills. */
+export function slackAppManifest() {
+  return {
+    display_information: {
+      name: "T3 Code",
+      description: "Follow Slack threads from T3 Code.",
+    },
+    oauth_config: {
+      redirect_urls: [SLACK_OAUTH_REDIRECT_URI],
+      scopes: { user: [...SLACK_USER_SCOPES] },
+      pkce_enabled: true,
+    },
+    settings: {
+      org_deploy_enabled: false,
+      socket_mode_enabled: false,
+      token_rotation_enabled: false,
+    },
+  };
+}
+
+export function slackCreateAppUrl(): string {
+  return `https://api.slack.com/apps?new_app=1&manifest_json=${encodeURIComponent(
+    JSON.stringify(slackAppManifest()),
+  )}`;
+}
+
+export const SlackChannelKind = Schema.Literals(["channel", "private", "group"]);
+export type SlackChannelKind = typeof SlackChannelKind.Type;
+
+export const SlackReaction = Schema.Struct({
+  /** Slack's name, including any skin tone suffix; what reactions.add takes. */
+  name: Schema.String,
+  count: Schema.Number,
+  reacted: Schema.Boolean,
+  /** Standard emoji character, when known. */
+  unicode: Schema.optional(Schema.String),
+  /** Workspace custom emoji image. */
+  imageUrl: Schema.optional(Schema.String),
+});
+export type SlackReaction = typeof SlackReaction.Type;
+
+export const SlackMessage = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  authorName: Schema.String,
+  authorAvatarUrl: Schema.optional(Schema.String),
+  /** Markdown converted from Slack mrkdwn, with mentions resolved. */
+  markdown: Schema.String,
+  fileCount: Schema.Number,
+  edited: Schema.Boolean,
+  replyCount: Schema.Number,
+  latestReplyTs: Schema.optional(Schema.String),
+  reactions: Schema.Array(SlackReaction),
+});
+export type SlackMessage = typeof SlackMessage.Type;
+
+export const SlackThread = Schema.Struct({
+  ...SlackMessage.fields,
+  channelName: Schema.String,
+  channelKind: SlackChannelKind,
+  permalink: Schema.String,
+});
+export type SlackThread = typeof SlackThread.Type;
+
+export const SlackConnection = Schema.Union([
+  Schema.Struct({
+    status: Schema.Literal("disconnected"),
+    /** The app last used, so reconnecting does not ask for it again. */
+    clientId: Schema.optional(Schema.String),
+    error: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("authorizing"),
+    clientId: Schema.String,
+    authorizeUrl: Schema.String,
+    error: Schema.optional(Schema.String),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("connected"),
+    clientId: Schema.String,
+    teamName: Schema.String,
+    teamUrl: Schema.String,
+    userName: Schema.String,
+  }),
+]);
+export type SlackConnection = typeof SlackConnection.Type;
+
+export const SlackSync = Schema.Struct({
+  channelCount: Schema.Number,
+  /** Channels read at least once since connecting. */
+  syncedChannelCount: Schema.Number,
+  lastSyncedAt: Schema.optional(Schema.String),
+  /** Background reads pause until then after Slack asks us to slow down. */
+  rateLimitedUntil: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.String),
+});
+export type SlackSync = typeof SlackSync.Type;
+
+export const SlackState = Schema.Struct({
+  connection: SlackConnection,
+  sync: SlackSync,
+  /** Newest first, capped. */
+  threads: Schema.Array(SlackThread),
+});
+export type SlackState = typeof SlackState.Type;
+
+export const SlackConnectInput = Schema.Struct({
+  clientId: Schema.String.check(Schema.isPattern(/^\d+\.\d+$/)),
+});
+export type SlackConnectInput = typeof SlackConnectInput.Type;
+
+export const SlackCompleteConnectInput = Schema.Struct({
+  /** The full URL Slack redirected to. */
+  callbackUrl: Schema.String,
+});
+export type SlackCompleteConnectInput = typeof SlackCompleteConnectInput.Type;
+
+export const SlackThreadRef = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+});
+export type SlackThreadRef = typeof SlackThreadRef.Type;
+
+export const SlackSetReactionInput = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  name: Schema.String,
+  reacted: Schema.Boolean,
+});
+export type SlackSetReactionInput = typeof SlackSetReactionInput.Type;
+
+export class SlackError extends Schema.TaggedError<SlackError>()("SlackError", {
+  operation: Schema.String,
+  message: Schema.String,
+}) {}
