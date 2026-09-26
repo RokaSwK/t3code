@@ -56,6 +56,7 @@ function fakeSlack(calls: Array<SlackCall>, rateLimited: Set<string>) {
         },
       ],
     },
+    "conversations.info": { ok: true, channel: { id: "C1", name: "general" } },
     "conversations.replies": {
       ok: true,
       messages: [
@@ -176,6 +177,21 @@ describe("SlackService", () => {
           .every((call) => call.token === "xoxp-test"),
       );
 
+      const detail = yield* slack.getThread({ url: thread!.permalink });
+      assert.strictEqual(detail.thread.ts, thread!.ts);
+      assert.strictEqual(detail.thread.channelName, "general");
+      assert.strictEqual(detail.replies.length, 1);
+      assert.strictEqual(detail.hasMore, false);
+      const callCount = calls.length;
+      const wrongWorkspace = yield* Effect.flip(
+        slack.getThread({ url: thread!.permalink.replace("acme.slack.com", "other.slack.com") }),
+      );
+      assert.include(wrongWorkspace.message, "different Slack workspace");
+      assert.strictEqual(calls.length, callCount);
+      const missing = yield* Effect.flip(
+        slack.getThread({ url: "https://acme.slack.com/archives/C1/p1000000000000000" }),
+      );
+      assert.include(missing.message, "not accessible");
       const replies = yield* slack.getReplies({ channelId: "C1", ts: thread!.ts });
       assert.deepStrictEqual(
         replies.map((message) => [message.authorName, message.markdown]),

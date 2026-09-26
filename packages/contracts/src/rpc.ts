@@ -262,6 +262,8 @@ import {
   SlackSetReactionInput,
   SlackState,
   SlackThreadRef,
+  SlackGetThreadInput,
+  SlackThreadDetail,
 } from "./slack.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -376,6 +378,7 @@ export const WS_METHODS = {
   slackCancelConnect: "slack.cancelConnect",
   slackDisconnect: "slack.disconnect",
   slackRefresh: "slack.refresh",
+  slackGetThread: "slack.getThread",
   slackGetReplies: "slack.getReplies",
   slackSetReaction: "slack.setReaction",
 
@@ -1322,6 +1325,12 @@ const WsSlackRefreshRpc = Rpc.make(WS_METHODS.slackRefresh, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+const WsSlackGetThreadRpc = Rpc.make(WS_METHODS.slackGetThread, {
+  payload: SlackGetThreadInput,
+  success: SlackThreadDetail,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 const WsSlackGetRepliesRpc = Rpc.make(WS_METHODS.slackGetReplies, {
   payload: SlackThreadRef,
   success: Schema.Array(SlackMessage),
@@ -1596,6 +1605,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackCancelConnectRpc,
   WsSlackDisconnectRpc,
   WsSlackRefreshRpc,
+  WsSlackGetThreadRpc,
   WsSlackGetRepliesRpc,
   WsSlackSetReactionRpc,
   WsSubscribeSlackStateRpc,

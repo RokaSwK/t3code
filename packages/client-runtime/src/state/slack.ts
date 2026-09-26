@@ -37,6 +37,10 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:refresh",
       tag: WS_METHODS.slackRefresh,
     }),
+    getThread: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:get-thread",
+      tag: WS_METHODS.slackGetThread,
+    }),
     getReplies: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:get-replies",
       tag: WS_METHODS.slackGetReplies,

@@ -823,6 +823,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+            ...(event.payload.linkedSlackThreads !== undefined
+              ? { linkedSlackThreads: event.payload.linkedSlackThreads }
+              : {}),
+
             ...(event.payload.activeOrderKey !== undefined
               ? { activeOrderKey: event.payload.activeOrderKey }
               : {}),

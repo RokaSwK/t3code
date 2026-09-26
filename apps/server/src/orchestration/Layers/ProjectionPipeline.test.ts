@@ -321,7 +321,14 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-branch-pr-proje
           url: "https://github.com/pingdotgg/t3code/pull/43",
         };
         const updates = [
-          { payload: { linkedPullRequest, branchPullRequest }, expected: branchPullRequest },
+          {
+            payload: {
+              linkedPullRequest,
+              branchPullRequest,
+              linkedSlackThreads: ["https://acme.slack.com/archives/C123/p1790000000000000"],
+            },
+            expected: branchPullRequest,
+          },
           { payload: { title: "Renamed thread" }, expected: branchPullRequest },
           { payload: { branchPullRequest: null }, expected: null },
         ];
@@ -338,16 +345,21 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-branch-pr-proje
           const rows = yield* sql<{
             readonly linkedPullRequest: string | null;
             readonly branchPullRequest: string | null;
+            readonly slackLinks: string;
           }>`
           SELECT
             linked_pull_request_json AS "linkedPullRequest",
-            branch_pull_request_json AS "branchPullRequest"
+            branch_pull_request_json AS "branchPullRequest",
+            linked_slack_threads_json AS "slackLinks"
           FROM projection_threads
           WHERE thread_id = ${threadId}
         `;
           assert.deepEqual(rows, [
             {
               linkedPullRequest: encodeThreadLinkedPullRequest(linkedPullRequest),
+              slackLinks: JSON.stringify([
+                "https://acme.slack.com/archives/C123/p1790000000000000",
+              ]),
               branchPullRequest:
                 update.expected === null ? null : encodeThreadLinkedPullRequest(update.expected),
             },

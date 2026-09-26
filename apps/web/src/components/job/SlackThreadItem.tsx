@@ -119,7 +119,7 @@ function SlackReactionBar({
   );
 }
 
-function SlackMessageBody({
+export function SlackMessageBody({
   message,
   onToggleReaction,
 }: {

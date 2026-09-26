@@ -1801,6 +1801,23 @@ function OpenCommandPaletteDialog(props: {
   }
 
   if (
+    activeThread &&
+    activeThreadServerConfig?.environment.capabilities.threadSlackLinks === true
+  ) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:link-slack-thread",
+      title: "Link or open Slack threads",
+      searchTerms: ["slack", "link", "thread", "conversation"],
+      icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        useRightPanelStore.getState().open(threadRef, "slack");
+      },
+    });
+  }
+
+  if (
     activeThread !== null &&
     threadPullRequestLinkMode(activeThreadServerConfig?.environment.capabilities) !== "unsupported"
   ) {

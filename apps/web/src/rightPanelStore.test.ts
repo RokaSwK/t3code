@@ -21,6 +21,28 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("keeps one Slack tab per thread across reload and allows closing it", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "slack");
+    store.open(refA, "slack");
+    const persisted = JSON.parse(
+      JSON.stringify({ byThreadKey: useRightPanelStore.getState().byThreadKey }),
+    );
+    useRightPanelStore.setState(migratePersistedRightPanelState(persisted));
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "slack",
+      surfaces: [{ id: "slack", kind: "slack" }],
+    });
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+    ).toEqual([]);
+    store.closeSurface(refA, "slack");
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).isOpen,
+    ).toBe(false);
+  });
+
   it("gives each host/device its own tab and preserves renamed tabs", () => {
     const store = useRightPanelStore.getState();
     const android = {

@@ -496,6 +496,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         branch: null,
         worktreePath: null,
         linkedPullRequest,
+        linkedSlackThreads: ["https://acme.slack.com/archives/C123/p1790000000000000"],
         branchPullRequest,
         latestTurnId: null,
         createdAt: "2026-03-24T00:00:00.000Z",
@@ -515,14 +516,18 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       });
 
       const persisted = yield* threads.getById({ threadId: ThreadId.make("thread-linked-pr") });
+      assert.deepStrictEqual(Option.getOrNull(persisted)?.linkedSlackThreads, [
+        "https://acme.slack.com/archives/C123/p1790000000000000",
+      ]);
       assert.deepStrictEqual(Option.getOrNull(persisted)?.linkedPullRequest, linkedPullRequest);
       assert.deepStrictEqual(Option.getOrNull(persisted)?.branchPullRequest, branchPullRequest);
 
       const row = Option.getOrNull(persisted);
       if (row === null) return yield* Effect.die("Expected linked thread row to exist.");
-      yield* threads.upsert({ ...row, linkedPullRequest: null });
+      yield* threads.upsert({ ...row, linkedPullRequest: null, linkedSlackThreads: [] });
 
       const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-linked-pr") });
+      assert.deepStrictEqual(Option.getOrNull(cleared)?.linkedSlackThreads, []);
       assert.strictEqual(Option.getOrNull(cleared)?.linkedPullRequest, null);
       assert.deepStrictEqual(Option.getOrNull(cleared)?.branchPullRequest, branchPullRequest);
 

@@ -1,3 +1,4 @@
+import { ThreadSlackLinks } from "./slack.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -801,6 +802,7 @@ export const OrchestrationThread = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   // Optional so payloads from pre-link servers still decode.
   pullRequests: Schema.Array(ThreadPullRequestLink).pipe(
@@ -892,6 +894,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.Array(ThreadPullRequestLink).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1248,6 +1251,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
 }).check(
   Schema.makeFilter(
@@ -1867,6 +1871,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   // No longer produced; kept so persisted events from before
   // thread.pull-request-linked still decode and replay into the link table.
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   updatedAt: IsoDateTime,

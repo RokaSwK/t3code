@@ -23,6 +23,9 @@ import {
   SLACK_OAUTH_LOOPBACK_PORT,
   SLACK_USER_SCOPES,
   SlackError,
+  parseSlackThreadUrl,
+  type SlackGetThreadInput,
+  type SlackThreadDetail,
   type SlackChannelKind,
   type SlackCompleteConnectInput,
   type SlackConnectInput,
@@ -153,6 +156,9 @@ export class SlackService extends Context.Service<
     readonly cancelConnect: Effect.Effect<void>;
     readonly disconnect: Effect.Effect<void>;
     readonly refresh: Effect.Effect<void>;
+    readonly getThread: (
+      input: SlackGetThreadInput,
+    ) => Effect.Effect<SlackThreadDetail, SlackError>;
     readonly getReplies: (
       ref: SlackThreadRef,
     ) => Effect.Effect<ReadonlyArray<SlackMessage>, SlackError>;
@@ -790,6 +796,47 @@ const make = Effect.gen(function* () {
     yield* Deferred.succeed(wake, undefined);
   });
 
+  const getThread = Effect.fn("slack.get_thread")(function* (input: SlackGetThreadInput) {
+    const ref = parseSlackThreadUrl(input.url);
+    if (!ref) return yield* slackError("get_thread", "Paste a Slack message or thread link.");
+    if (!connection)
+      return yield* slackError("get_thread", "Connect Slack from the Job page first.");
+    if (new URL(ref.url).hostname !== new URL(connection.teamUrl).hostname) {
+      return yield* slackError(
+        "get_thread",
+        "This link belongs to a different Slack workspace. Connect that workspace first.",
+      );
+    }
+    const info = yield* call("conversations.info", { channel: ref.channelId }, "interactive");
+    const channel = info.channel as SlackApiChannel | undefined;
+    if (!channel) return yield* slackError("get_thread", "Slack channel is unavailable.");
+    const body = yield* call(
+      "conversations.replies",
+      { channel: ref.channelId, ts: ref.ts, limit: "200" },
+      "interactive",
+    );
+    const messages = yield* resolveMessages(
+      ref.channelId,
+      (body.messages as SlackApiMessage[] | undefined) ?? [],
+      "interactive",
+    );
+    const root = messages.find((message) => message.ts === ref.ts);
+    if (!root)
+      return yield* slackError("get_thread", "Slack thread was deleted or is not accessible.");
+    return {
+      thread: {
+        ...root,
+        channelName: channelDisplayName(channel),
+        channelKind: channelKind(channel),
+        permalink: ref.url,
+      },
+      replies: messages.filter((message) => message.ts !== ref.ts),
+      hasMore:
+        body.has_more === true ||
+        Boolean((body.response_metadata as { next_cursor?: string } | undefined)?.next_cursor),
+    };
+  });
+
   const getReplies = Effect.fn("slack.get_replies")(function* (ref: SlackThreadRef) {
     const body = yield* call(
       "conversations.replies",
@@ -861,6 +908,7 @@ const make = Effect.gen(function* () {
     cancelConnect,
     disconnect,
     refresh,
+    getThread,
     getReplies,
     setReaction,
   });

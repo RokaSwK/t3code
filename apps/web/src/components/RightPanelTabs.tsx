@@ -15,6 +15,7 @@ import type {
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
 import {
   Bot,
+  Slack,
   Smartphone,
   ChevronDown,
   ChevronLeft,
@@ -121,6 +122,8 @@ interface RightPanelTabsProps {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddSlack?: (() => void) | undefined;
+  slackAvailable?: boolean | undefined;
   onAddAgents: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
@@ -324,6 +327,8 @@ function RightPanelEmptyState(props: {
   onAddFiles: () => void;
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
+  onAddSlack?: (() => void) | undefined;
+  slackAvailable?: boolean | undefined;
   onAddAgents: () => void;
   onAddDevice: () => void;
   browserAvailable: boolean;
@@ -392,6 +397,15 @@ function RightPanelEmptyState(props: {
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.pullRequests,
       onClick: props.onAddPullRequests,
+      badgeCount: 0,
+    },
+    {
+      label: "Slack threads",
+      icon: Slack,
+      shortcut: "S",
+      available: props.slackAvailable === true,
+      disabledReason: "Select a saved thread on an environment that supports Slack links.",
+      onClick: () => props.onAddSlack?.(),
       badgeCount: 0,
     },
     {
@@ -626,6 +640,8 @@ function surfaceTitle(
       );
     case "pull-request":
       return `#${surface.number}`;
+    case "slack":
+      return "Slack threads";
     case "pull-requests":
       return "Pull requests";
     case "agents":
@@ -711,6 +727,8 @@ function SurfaceIcon({
           seed={pullRequestStatusSeeds?.[surface.id]}
         />
       );
+    case "slack":
+      return <Slack className="size-3 shrink-0" />;
     case "pull-requests":
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "agents":
@@ -916,6 +934,15 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.pullRequestsAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.pullRequests,
       onClick: props.onAddPullRequests,
+    },
+    {
+      label: "Slack threads",
+      icon: Slack,
+      shortcut: "S",
+      available: props.slackAvailable === true,
+      disabledReason: "Select a saved thread on an environment that supports Slack links.",
+      onClick: () => props.onAddSlack?.(),
+      badgeCount: 0,
     },
     {
       label: "Agents",
@@ -1414,6 +1441,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
+            onAddSlack={props.onAddSlack}
+            slackAvailable={props.slackAvailable}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}
             browserAvailable={props.browserAvailable}

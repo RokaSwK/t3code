@@ -267,6 +267,9 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           ...(event.payload.title !== undefined ? { title: event.payload.title } : {}),
+          ...(event.payload.linkedSlackThreads !== undefined
+            ? { linkedSlackThreads: event.payload.linkedSlackThreads }
+            : {}),
           ...(event.payload.titleState !== undefined
             ? { titleState: event.payload.titleState }
             : {}),

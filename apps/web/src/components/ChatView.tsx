@@ -215,6 +215,7 @@ import { pullRequestPanelContext } from "./pullRequest/pullRequestDetail.logic";
 import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
+import { ThreadSlackPanel } from "./job/ThreadSlackPanel";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { AgentsPanel } from "./AgentsPanel";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
@@ -4589,6 +4590,10 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
+  const addSlackSurface = useCallback(() => {
+    if (activeThreadRef && isServerThread)
+      useRightPanelStore.getState().open(activeThreadRef, "slack");
+  }, [activeThreadRef, isServerThread]);
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "agents");
@@ -9652,6 +9657,11 @@ export default function ChatView(props: ChatViewProps) {
       />
     ) : renderedRightPanelSurface?.kind === "pull-requests" && activeThreadRef ? (
       <ThreadPullRequestsPanel threadRef={activeThreadRef} />
+    ) : renderedRightPanelSurface?.kind === "slack" && activeThreadRef ? (
+      <ThreadSlackPanel
+        key={`${activeThreadRef.environmentId}:${activeThreadRef.threadId}`}
+        threadRef={activeThreadRef}
+      />
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -10312,6 +10322,10 @@ export default function ChatView(props: ChatViewProps) {
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
+          onAddSlack={addSlackSurface}
+          slackAvailable={
+            isServerThread && serverConfig?.environment.capabilities.threadSlackLinks === true
+          }
           onAddAgents={addAgentsSurface}
           onAddDevice={addDeviceSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
@@ -10369,6 +10383,10 @@ export default function ChatView(props: ChatViewProps) {
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
+            onAddSlack={addSlackSurface}
+            slackAvailable={
+              isServerThread && serverConfig?.environment.capabilities.threadSlackLinks === true
+            }
             onAddAgents={addAgentsSurface}
             onAddDevice={addDeviceSurface}
             browserAvailable={isPreviewSupportedInRuntime()}

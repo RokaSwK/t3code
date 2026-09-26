@@ -167,3 +167,44 @@ export class SlackError extends Schema.TaggedError<SlackError>()("SlackError", {
   operation: Schema.String,
   message: Schema.String,
 }) {}
+
+/** Parse a copied Slack message link, resolving reply links to their parent thread. */
+export function parseSlackThreadUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    if (
+      url.protocol !== "https:" ||
+      !/^[a-z0-9-]+\.slack\.com$/i.test(url.hostname) ||
+      url.username ||
+      url.password ||
+      url.port
+    )
+      return null;
+    const match = /^\/archives\/([CG][A-Z0-9]+)\/p(\d{10,})(\d{6})\/?$/.exec(url.pathname);
+    if (!match) return null;
+    const ts = url.searchParams.get("thread_ts") ?? `${match[2]}.${match[3]}`;
+    if (!/^\d{10,}\.\d{6}$/.test(ts)) return null;
+    return {
+      channelId: match[1]!,
+      ts,
+      url: `https://${url.hostname}/archives/${match[1]}/p${ts.replace(".", "")}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export const SlackThreadUrl = Schema.String.check(
+  Schema.makeFilter(
+    (value) => parseSlackThreadUrl(value) !== null || "Paste a Slack message or thread link.",
+  ),
+);
+export const ThreadSlackLinks = Schema.Array(SlackThreadUrl).check(Schema.isMaxLength(20));
+export const SlackGetThreadInput = Schema.Struct({ url: SlackThreadUrl });
+export type SlackGetThreadInput = typeof SlackGetThreadInput.Type;
+export const SlackThreadDetail = Schema.Struct({
+  thread: SlackThread,
+  replies: Schema.Array(SlackMessage),
+  hasMore: Schema.Boolean,
+});
+export type SlackThreadDetail = typeof SlackThreadDetail.Type;

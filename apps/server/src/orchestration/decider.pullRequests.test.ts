@@ -115,6 +115,27 @@ const snapshot: ThreadPullRequestSnapshot = {
 };
 
 it.layer(NodeServices.layer)("pull request link decider", (it) => {
+  it.effect("persists and removes Slack links without changing pull requests", () =>
+    Effect.gen(function* () {
+      let model = makeReadModel([makeLink()]);
+      const url = "https://acme.slack.com/archives/C123/p1790000000000000";
+      for (const links of [[url, url], []]) {
+        const command = yield* decodeCommand({
+          type: "thread.meta.update",
+          commandId: CommandId.make(`slack-${links.length}`),
+          threadId: THREAD_ID,
+          linkedSlackThreads: links,
+        });
+        const event = expectSingleEvent(
+          yield* decideOrchestrationCommand({ readModel: model, command }),
+          "thread.meta-updated",
+        );
+        model = yield* projectEvent(model, { ...event, sequence: model.snapshotSequence + 1 });
+        expect(model.threads[0]?.linkedSlackThreads).toEqual([...new Set(links)]);
+        expect(model.threads[0]?.pullRequests).toHaveLength(1);
+      }
+    }),
+  );
   it.effect("links the same Forgejo number on two ports and unlinks an older portless record", () =>
     Effect.gen(function* () {
       const existing = makeLink({

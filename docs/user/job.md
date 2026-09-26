@@ -26,3 +26,14 @@ from T3 Code. Direct messages are not included.
 
 Busy channels are checked every 30 seconds and quiet ones less often, within Slack's rate limits.
 If Slack asks T3 Code to slow down, the page shows when checking resumes.
+
+## Link Slack conversations to a T3 thread
+
+On web and desktop, open **Slack threads** from the right panel’s **+** menu, or choose
+**Link or open Slack threads** in the command palette. Paste a Slack message link to save it
+with the current T3 thread. Links to replies open their parent conversation.
+
+Select a saved link to read the conversation beside your work. The sidebar’s Slack icon reopens
+these links. Refresh to fetch new replies, or unlink a conversation when it is no longer relevant.
+The environment must be connected to the same Slack workspace. For files or conversations longer
+than 200 messages, open the link in Slack. Native mobile does not yet have this panel.

@@ -641,6 +641,10 @@ export function projectEvent(
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               ...(payload.title !== undefined ? { title: payload.title } : {}),
+              ...(payload.linkedSlackThreads !== undefined
+                ? { linkedSlackThreads: payload.linkedSlackThreads }
+                : {}),
+
               ...(payload.titleState !== undefined ? { titleState: payload.titleState } : {}),
               ...(payload.titleRegeneration !== undefined
                 ? { titleRegeneration: payload.titleRegeneration }

@@ -46,6 +46,7 @@ import {
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
+  SlackIcon,
   AlarmClockOffIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -1514,6 +1515,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         onOpenPullRequest={handlePrClick}
       />
     ) : null;
+  const slackBadge = thread.linkedSlackThreads?.length ? (
+    <InlineButton
+      aria-label={`Open ${thread.linkedSlackThreads.length} linked Slack threads`}
+      onClick={(event) => {
+        event.stopPropagation();
+        useRightPanelStore.getState().open(threadRef, "slack");
+        if (!props.isActive) onThreadActivate(threadRef);
+      }}
+    >
+      <SlackIcon className="size-3.5" />
+    </InlineButton>
+  ) : null;
   const terminalStatusIcon = terminalStatus ? (
     <span
       role="img"
@@ -1627,6 +1640,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
+            {slackBadge}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -1935,6 +1949,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               )}
               {terminalStatusIcon}
               {prBadge}
+              {slackBadge}
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}
