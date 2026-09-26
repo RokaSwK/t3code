@@ -619,6 +619,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
+            linkedSlackThreads: event.payload.linkedSlackThreads ?? [],
+            owner: null,
             linkedPullRequest: null,
             branchPullRequest: null,
             latestTurnId: null,
@@ -826,7 +828,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.linkedSlackThreads !== undefined
               ? { linkedSlackThreads: event.payload.linkedSlackThreads }
               : {}),
-
+            ...(event.payload.owner !== undefined ? { owner: event.payload.owner } : {}),
             ...(event.payload.activeOrderKey !== undefined
               ? { activeOrderKey: event.payload.activeOrderKey }
               : {}),

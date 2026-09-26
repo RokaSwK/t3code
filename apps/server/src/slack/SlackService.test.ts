@@ -60,12 +60,54 @@ function fakeSlack(calls: Array<SlackCall>, rateLimited: Set<string>) {
     "conversations.replies": {
       ok: true,
       messages: [
-        { ts: root, user: "U2", text: "root" },
+        { ts: root, user: "U2", text: "root", reply_count: 1, latest_reply: reply },
         { ts: reply, thread_ts: root, user: "U1", text: "reply" },
       ],
     },
     "users.info": { ok: true },
     "reactions.add": { ok: true },
+    "reactions.remove": { ok: true },
+    // A thread the user marked with :eyes: in a direct message they do not poll, plus a mark
+    // on a reply that must resolve to its parent in #general.
+    "reactions.list": {
+      ok: true,
+      items: [
+        {
+          type: "message",
+          channel: "D9",
+          message: {
+            ts: "1700000000.000100",
+            user: "U2",
+            text: "look at this",
+            reply_count: 0,
+            reactions: [{ name: "eyes", count: 1, users: ["U1"] }],
+          },
+        },
+        {
+          type: "message",
+          channel: "C1",
+          message: {
+            ts: reply,
+            thread_ts: root,
+            user: "U1",
+            text: "reply",
+            reactions: [{ name: "eyes", count: 1, users: ["U1"] }],
+          },
+        },
+      ],
+      response_metadata: { next_cursor: "" },
+    },
+    "users.list": {
+      ok: true,
+      members: [
+        { id: "U2", profile: { display_name: "Bo", image_48: "https://a.test/bo.png" } },
+        { id: "U1", profile: { display_name: "Ada" } },
+        { id: "B1", is_bot: true, profile: { display_name: "Robot" } },
+        { id: "U3", deleted: true, profile: { display_name: "Gone" } },
+        { id: "USLACKBOT", profile: { display_name: "Slackbot" } },
+      ],
+      response_metadata: { next_cursor: "" },
+    },
   };
   return Layer.succeed(
     HttpClient.HttpClient,
@@ -87,15 +129,17 @@ function fakeSlack(calls: Array<SlackCall>, rateLimited: Set<string>) {
           );
         }
         const body =
-          method === "users.info"
-            ? {
-                ok: true,
-                user: {
-                  id: params.get("user"),
-                  profile: { display_name: params.get("user") === "U1" ? "Ada" : "Bo" },
-                },
-              }
-            : (responses[method] ?? { ok: false, error: "unknown_method" });
+          method === "conversations.info" && params.get("channel") === "D9"
+            ? { ok: true, channel: { id: "D9", is_im: true, user: "U2" } }
+            : method === "users.info"
+              ? {
+                  ok: true,
+                  user: {
+                    id: params.get("user"),
+                    profile: { display_name: params.get("user") === "U1" ? "Ada" : "Bo" },
+                  },
+                }
+              : (responses[method] ?? { ok: false, error: "unknown_method" });
         return HttpClientResponse.fromWeb(
           request,
           // @effect-diagnostics-next-line preferSchemaOverJson:off - canned Slack response.
@@ -151,6 +195,7 @@ describe("SlackService", () => {
         clientId: "123.456",
         teamName: "Acme",
         teamUrl: "https://acme.slack.com/",
+        userId: "U1",
         userName: "ada",
       });
       const exchange = calls.find((call) => call.method === "oauth.v2.access");
@@ -197,6 +242,36 @@ describe("SlackService", () => {
         replies.map((message) => [message.authorName, message.markdown]),
         [["Ada", "reply"]],
       );
+
+      // Followed threads come from the user's own :eyes: reactions, anywhere in the workspace.
+      const followed = yield* waitForState((value) => value.followed.length === 2);
+      assert.deepStrictEqual(
+        followed.followed.map((item) => [
+          item.channelId,
+          item.ts,
+          item.channelName,
+          item.channelKind,
+        ]),
+        [
+          ["C1", thread!.ts, "general", "channel"],
+          ["D9", "1700000000.000100", "Bo", "dm"],
+        ],
+      );
+      assert.strictEqual(followed.followed[0]?.replyCount, 1);
+
+      const members = yield* slack.listMembers;
+      assert.deepStrictEqual(members, [
+        { userId: "U1", name: "Ada" },
+        { userId: "U2", name: "Bo", avatarUrl: "https://a.test/bo.png" },
+      ]);
+      const memberCalls = calls.filter((call) => call.method === "users.list").length;
+      yield* slack.listMembers;
+      assert.strictEqual(calls.filter((call) => call.method === "users.list").length, memberCalls);
+
+      // Unfollowing drops the thread from the list at once.
+      yield* slack.setReaction({ channelId: "C1", ts: thread!.ts, name: "eyes", reacted: false });
+      const unfollowed = yield* waitForState((value) => value.followed.length === 1);
+      assert.strictEqual(unfollowed.followed[0]?.channelId, "D9");
 
       // Slack's 429 fails the click, and the next one waits out Retry-After.
       rateLimited.add("reactions.add");

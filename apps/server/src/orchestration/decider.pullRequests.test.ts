@@ -136,6 +136,27 @@ it.layer(NodeServices.layer)("pull request link decider", (it) => {
       }
     }),
   );
+  it.effect("assigns and clears a thread owner", () =>
+    Effect.gen(function* () {
+      let model = makeReadModel([makeLink()]);
+      const owner = { kind: "slack" as const, userId: "U2", name: "Bo" };
+      for (const next of [owner, null]) {
+        const command = yield* decodeCommand({
+          type: "thread.meta.update",
+          commandId: CommandId.make(`owner-${next === null ? "clear" : next.userId}`),
+          threadId: THREAD_ID,
+          owner: next,
+        });
+        const event = expectSingleEvent(
+          yield* decideOrchestrationCommand({ readModel: model, command }),
+          "thread.meta-updated",
+        );
+        expect(event.payload.owner).toEqual(next);
+        model = yield* projectEvent(model, { ...event, sequence: model.snapshotSequence + 1 });
+        expect(model.threads[0]?.owner).toEqual(next);
+      }
+    }),
+  );
   it.effect("links the same Forgejo number on two ports and unlinks an older portless record", () =>
     Effect.gen(function* () {
       const existing = makeLink({

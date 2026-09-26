@@ -445,6 +445,8 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            linkedSlackThreads: payload.linkedSlackThreads ?? [],
+            owner: null,
             pullRequests: [],
             branchPullRequest: null,
             latestTurn: null,
@@ -644,7 +646,7 @@ export function projectEvent(
               ...(payload.linkedSlackThreads !== undefined
                 ? { linkedSlackThreads: payload.linkedSlackThreads }
                 : {}),
-
+              ...(payload.owner !== undefined ? { owner: payload.owner } : {}),
               ...(payload.titleState !== undefined ? { titleState: payload.titleState } : {}),
               ...(payload.titleRegeneration !== undefined
                 ? { titleRegeneration: payload.titleRegeneration }

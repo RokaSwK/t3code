@@ -1,4 +1,4 @@
-import { ThreadSlackLinks } from "./slack.ts";
+import { ThreadOwner, ThreadSlackLinks } from "./slack.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
@@ -803,6 +803,7 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedSlackThreads: Schema.optional(ThreadSlackLinks),
+  owner: Schema.optional(Schema.NullOr(ThreadOwner)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   // Optional so payloads from pre-link servers still decode.
   pullRequests: Schema.Array(ThreadPullRequestLink).pipe(
@@ -895,6 +896,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedSlackThreads: Schema.optional(ThreadSlackLinks),
+  owner: Schema.optional(Schema.NullOr(ThreadOwner)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.Array(ThreadPullRequestLink).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
@@ -1134,6 +1136,8 @@ const ThreadCreateCommand = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   historyImport: Schema.optional(Schema.Literal(true)),
+  /** Slack threads this thread is started from; linked at creation. */
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
 });
 
 const ThreadDeleteCommand = Schema.Struct({
@@ -1252,6 +1256,7 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   linkedSlackThreads: Schema.optional(ThreadSlackLinks),
+  owner: Schema.optional(Schema.NullOr(ThreadOwner)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
 }).check(
   Schema.makeFilter(
@@ -1302,6 +1307,7 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
 });
 
 const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
@@ -1778,6 +1784,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
 });
 
 export const ThreadDeletedPayload = Schema.Struct({
@@ -1872,6 +1879,7 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   // No longer produced; kept so persisted events from before
   // thread.pull-request-linked still decode and replay into the link table.
   linkedSlackThreads: Schema.optional(ThreadSlackLinks),
+  owner: Schema.optional(Schema.NullOr(ThreadOwner)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   updatedAt: IsoDateTime,

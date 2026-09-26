@@ -21,6 +21,7 @@ export type ThreadActionMenuId =
   | `snooze:${string}`
   | "unsnooze"
   | "rename"
+  | "assign-owner"
   | "regenerate-title"
   | "mark-unread"
   | "copy"
@@ -57,6 +58,8 @@ export interface ThreadActionMenuState {
     readonly snooze: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
+    /** Server understands `owner` on thread.meta.update. */
+    readonly ownership?: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
 }
@@ -127,6 +130,9 @@ export function buildThreadActionMenuItems(
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },
+    ...(state.supports.ownership === true
+      ? [{ id: "assign-owner" as const, label: "Assign owner…", icon: "user" }]
+      : []),
     ...(state.projectFilter
       ? [
           {

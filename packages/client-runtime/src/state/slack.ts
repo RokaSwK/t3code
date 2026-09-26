@@ -49,5 +49,10 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:set-reaction",
       tag: WS_METHODS.slackSetReaction,
     }),
+    /** Workspace members for the thread owner picker. */
+    listMembers: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:list-members",
+      tag: WS_METHODS.slackListMembers,
+    }),
   };
 }

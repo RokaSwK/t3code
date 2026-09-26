@@ -406,6 +406,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           worktreePath: command.worktreePath,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
+          ...(command.linkedSlackThreads !== undefined && command.linkedSlackThreads.length > 0
+            ? { linkedSlackThreads: [...new Set(command.linkedSlackThreads)] }
+            : {}),
         },
       };
     }
@@ -1051,6 +1054,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.linkedSlackThreads !== undefined
             ? { linkedSlackThreads: [...new Set(command.linkedSlackThreads)] }
             : {}),
+          ...(command.owner !== undefined ? { owner: command.owner } : {}),
           ...(command.linkedPullRequest !== undefined
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),

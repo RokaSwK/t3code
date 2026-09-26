@@ -122,6 +122,8 @@ export function applyThreadDetailEvent(
           interactionMode: event.payload.interactionMode,
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
+          linkedSlackThreads: event.payload.linkedSlackThreads ?? [],
+          owner: null,
           branchPullRequest: null,
           latestTurn: null,
           createdAt: event.payload.createdAt,
@@ -270,6 +272,7 @@ export function applyThreadDetailEvent(
           ...(event.payload.linkedSlackThreads !== undefined
             ? { linkedSlackThreads: event.payload.linkedSlackThreads }
             : {}),
+          ...(event.payload.owner !== undefined ? { owner: event.payload.owner } : {}),
           ...(event.payload.titleState !== undefined
             ? { titleState: event.payload.titleState }
             : {}),

@@ -8045,6 +8045,9 @@ export default function ChatView(props: ChatViewProps) {
                       branch: activeThreadBranch,
                       worktreePath: null,
                       createdAt: messageCreatedAt,
+                      ...(activeThread.linkedSlackThreads?.length
+                        ? { linkedSlackThreads: activeThread.linkedSlackThreads }
+                        : {}),
                     },
                     prepareWorktree: {
                       projectCwd: activeProject.workspaceRoot,
@@ -8380,6 +8383,9 @@ export default function ChatView(props: ChatViewProps) {
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
+                      ...(activeThread.linkedSlackThreads?.length
+                        ? { linkedSlackThreads: activeThread.linkedSlackThreads }
+                        : {}),
                     },
                   }
                 : {}),

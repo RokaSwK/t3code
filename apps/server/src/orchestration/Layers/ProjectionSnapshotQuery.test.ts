@@ -462,6 +462,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           branch: null,
           worktreePath: null,
           linkedSlackThreads: [],
+          owner: null,
           pullRequests: expectedPullRequests,
           branchPullRequest,
           latestTurn: {
@@ -590,6 +591,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           branch: null,
           worktreePath: null,
           linkedSlackThreads: [],
+          owner: null,
           pullRequests: expectedPullRequests,
           branchPullRequest,
           latestTurn: {

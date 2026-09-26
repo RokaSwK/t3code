@@ -85,6 +85,10 @@ const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<stri
       },
     },
   ],
+  user: [
+    { tag: "path", attrs: { d: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" } },
+    { tag: "circle", attrs: { cx: "12", cy: "7", r: "4" } },
+  ],
   "pin-off": [
     { tag: "path", attrs: { d: "M12 17v5" } },
     { tag: "path", attrs: { d: "M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89" } },

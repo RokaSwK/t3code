@@ -323,6 +323,7 @@ const PersistedDraftThreadState = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
   startFromOrigin: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  linkedSlackThreads: Schema.optionalKey(Schema.Array(Schema.String)),
   promotedTo: Schema.optionalKey(
     Schema.NullOr(
       Schema.Struct({
@@ -450,6 +451,8 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  /** Slack threads the draft was started from; linked when the thread is created. */
+  linkedSlackThreads?: readonly string[];
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -520,6 +523,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      linkedSlackThreads?: readonly string[];
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -537,6 +541,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      linkedSlackThreads?: readonly string[];
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -553,6 +558,7 @@ interface ComposerDraftStoreState {
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
+      linkedSlackThreads?: readonly string[];
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
       environmentSelection?: "auto" | "manual";
@@ -1504,6 +1510,7 @@ function createDraftThreadState(
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
     startFromOrigin?: boolean;
+    linkedSlackThreads?: readonly string[];
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
     environmentSelection?: "auto" | "manual";
@@ -1560,8 +1567,23 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    // Slack links are not machine-specific, so they survive a project change.
+    ...(options?.linkedSlackThreads !== undefined
+      ? { linkedSlackThreads: options.linkedSlackThreads }
+      : existingThread?.linkedSlackThreads !== undefined
+        ? { linkedSlackThreads: existingThread.linkedSlackThreads }
+        : {}),
     promotedTo: null,
   };
+}
+
+function sameSlackLinks(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  const a = left ?? [];
+  const b = right ?? [];
+  return a.length === b.length && a.every((link, index) => link === b[index]);
 }
 
 function scopedThreadRefsEqual(
@@ -1594,6 +1616,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    sameSlackLinks(left.linkedSlackThreads, right.linkedSlackThreads) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -2206,7 +2229,11 @@ export function partializeComposerDraftStoreState(
     if (!keptSessionKeys.has(threadKey)) {
       continue;
     }
-    persistedDraftThreadsByThreadKey[threadKey] = draftThread;
+    const { linkedSlackThreads, ...persistedDraftThread } = draftThread;
+    persistedDraftThreadsByThreadKey[threadKey] = {
+      ...persistedDraftThread,
+      ...(linkedSlackThreads ? { linkedSlackThreads: [...linkedSlackThreads] } : {}),
+    };
   }
   return {
     draftsByThreadKey: persistedDraftsByThreadKey,
@@ -2487,6 +2514,9 @@ function toHydratedDraftThreadState(
     worktreePath: persistedDraftThread.worktreePath,
     envMode: persistedDraftThread.envMode,
     startFromOrigin: persistedDraftThread.startFromOrigin,
+    ...(persistedDraftThread.linkedSlackThreads?.length
+      ? { linkedSlackThreads: persistedDraftThread.linkedSlackThreads }
+      : {}),
     ...(persistedDraftThread.environmentSelection
       ? { environmentSelection: persistedDraftThread.environmentSelection }
       : {}),
@@ -2790,6 +2820,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              ...(options.linkedSlackThreads !== undefined
+                ? { linkedSlackThreads: options.linkedSlackThreads }
+                : existing.linkedSlackThreads !== undefined
+                  ? { linkedSlackThreads: existing.linkedSlackThreads }
+                  : {}),
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2805,6 +2840,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              sameSlackLinks(nextDraftThread.linkedSlackThreads, existing.linkedSlackThreads) &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;

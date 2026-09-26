@@ -32,6 +32,53 @@ export const SLACK_FEED_LIMIT = 150;
 /** Channel membership changes rarely; re-list it this often. */
 export const SLACK_CHANNEL_LIST_INTERVAL_MS = 10 * 60_000;
 
+/** Followed threads are read back from the user's reactions this often. */
+export const SLACK_FOLLOWED_INTERVAL_MS = 2 * 60_000;
+export const SLACK_FOLLOWED_LIMIT = 50;
+
+/** An entry of `reactions.list`; only message items matter here. */
+export interface SlackApiReactionItem {
+  readonly type: string;
+  readonly channel?: string;
+  readonly message?: SlackApiMessage;
+}
+
+export interface SlackFollowedRef {
+  readonly channelId: string;
+  /** The conversation root; a followed reply follows its parent. */
+  readonly ts: string;
+  /** Known when the followed message is the root itself. */
+  readonly root?: SlackApiMessage;
+}
+
+/**
+ * The conversations the user marked with `reaction`, newest first and deduplicated. Slack
+ * lists every item the user reacted to, so the reaction is checked on each message.
+ */
+export function slackFollowedRefs(
+  items: ReadonlyArray<SlackApiReactionItem>,
+  userId: string,
+  reaction: string,
+  limit = SLACK_FOLLOWED_LIMIT,
+): SlackFollowedRef[] {
+  const refs = new Map<string, SlackFollowedRef>();
+  for (const item of items) {
+    const message = item.message;
+    if (item.type !== "message" || !item.channel || !message) continue;
+    const marked = message.reactions?.some(
+      (candidate) => candidate.name === reaction && (candidate.users ?? []).includes(userId),
+    );
+    if (!marked) continue;
+    const ts = message.thread_ts ?? message.ts;
+    const key = `${item.channel}:${ts}`;
+    const existing = refs.get(key);
+    const isRoot = ts === message.ts;
+    if (existing && (existing.root || !isRoot)) continue;
+    refs.set(key, { channelId: item.channel, ts, ...(isRoot ? { root: message } : {}) });
+  }
+  return slackFeedOrder(refs.values(), limit);
+}
+
 /** Housekeeping messages that are not conversation starters. */
 const IGNORED_SUBTYPES = new Set([
   "channel_join",

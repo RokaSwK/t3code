@@ -57,6 +57,7 @@ import {
   SquarePenIcon,
   SunIcon,
   TextSearchIcon,
+  UserIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -163,6 +164,7 @@ import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sideb
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
+import { requestThreadOwner } from "./ThreadOwnerDialog";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon, ForgejoIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -1813,6 +1815,20 @@ function OpenCommandPaletteDialog(props: {
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().open(threadRef, "slack");
+      },
+    });
+  }
+
+  if (activeThread && activeThreadServerConfig?.environment.capabilities.threadOwnership === true) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:assign-thread-owner",
+      title: "Assign thread owner…",
+      searchTerms: ["owner", "assign", "slack", "member", "ownership"],
+      icon: <UserIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await requestThreadOwner(threadRef);
       },
     });
   }

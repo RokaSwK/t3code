@@ -12,7 +12,7 @@
  *
  * @module Slack
  */
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /** Registered in the Slack app manifest; Slack matches it exactly. */
 export const SLACK_OAUTH_LOOPBACK_PORT = 38117;
@@ -58,7 +58,7 @@ export function slackCreateAppUrl(): string {
   )}`;
 }
 
-export const SlackChannelKind = Schema.Literals(["channel", "private", "group"]);
+export const SlackChannelKind = Schema.Literals(["channel", "private", "group", "dm"]);
 export type SlackChannelKind = typeof SlackChannelKind.Type;
 
 export const SlackReaction = Schema.Struct({
@@ -114,6 +114,7 @@ export const SlackConnection = Schema.Union([
     clientId: Schema.String,
     teamName: Schema.String,
     teamUrl: Schema.String,
+    userId: Schema.String,
     userName: Schema.String,
   }),
 ]);
@@ -135,8 +136,36 @@ export const SlackState = Schema.Struct({
   sync: SlackSync,
   /** Newest first, capped. */
   threads: Schema.Array(SlackThread),
+  /**
+   * Threads the user marked with :eyes:, anywhere in the workspace and however old, newest
+   * first. Reading the reaction back from Slack makes the mark the only state to manage.
+   */
+  followed: Schema.Array(SlackThread).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type SlackState = typeof SlackState.Type;
+
+/** The reaction that marks a Slack thread as followed. */
+export const SLACK_FOLLOW_REACTION = "eyes";
+
+/** A workspace member who can own T3 threads. */
+export const SlackMember = Schema.Struct({
+  userId: Schema.String,
+  name: Schema.String,
+  avatarUrl: Schema.optional(Schema.String),
+});
+export type SlackMember = typeof SlackMember.Type;
+
+/**
+ * Who a T3 thread is for. Absent or null means the person running this environment, who
+ * created it. A snapshot of the member so the sidebar renders without a live lookup.
+ */
+export const ThreadOwner = Schema.Struct({
+  kind: Schema.Literal("slack"),
+  userId: Schema.String,
+  name: Schema.String,
+  avatarUrl: Schema.optional(Schema.String),
+});
+export type ThreadOwner = typeof ThreadOwner.Type;
 
 export const SlackConnectInput = Schema.Struct({
   clientId: Schema.String.check(Schema.isPattern(/^\d+\.\d+$/)),

@@ -1,14 +1,16 @@
-import type { EnvironmentId, SlackState } from "@t3tools/contracts";
-import { EllipsisIcon } from "lucide-react";
+import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
+import { EllipsisIcon, MessageSquareIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
+import { useThreadShells } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { slackEnvironment, useSlackState } from "../../state/slack";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { ScrollArea } from "../ui/scroll-area";
@@ -19,6 +21,7 @@ import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { SlackConnectPanel } from "./SlackConnectPanel";
 import { SlackThreadItem } from "./SlackThreadItem";
+import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 
 function syncLabel(sync: SlackState["sync"]): string {
   if (sync.rateLimitedUntil) {
@@ -76,6 +79,55 @@ function JobHeaderActions({
   );
 }
 
+/** T3 threads already started from this Slack thread, and the way to start another. */
+function FollowedThreadActions({
+  environmentId,
+  thread,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly thread: SlackThread;
+}) {
+  const navigate = useNavigate();
+  const shells = useThreadShells();
+  const [picking, setPicking] = useState(false);
+  const linked = shells.filter(
+    (shell) =>
+      shell.environmentId === environmentId &&
+      shell.linkedSlackThreads?.includes(thread.permalink) === true,
+  );
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 ps-11">
+      {linked.map((shell) => (
+        <InlineButton
+          key={shell.id}
+          tone="muted"
+          className="max-w-64"
+          onClick={() =>
+            void navigate({
+              to: "/$environmentId/$threadId",
+              params: { environmentId: shell.environmentId, threadId: shell.id },
+            })
+          }
+        >
+          <MessageSquareIcon />
+          <span className="truncate">{shell.title}</span>
+        </InlineButton>
+      ))}
+      <Button size="xs" variant="outline" onClick={() => setPicking(true)}>
+        <MessageSquarePlusIcon />
+        {linked.length > 0 ? "Start another thread" : "Start thread"}
+      </Button>
+      {picking ? (
+        <StartThreadFromSlackDialog
+          environmentId={environmentId}
+          thread={thread}
+          onOpenChange={setPicking}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function JobFeed({
   environmentId,
   state,
@@ -84,16 +136,44 @@ function JobFeed({
   readonly state: SlackState;
 }) {
   const settling = state.sync.syncedChannelCount < state.sync.channelCount;
+  const followedKeys = new Set(state.followed.map((thread) => `${thread.channelId}:${thread.ts}`));
+  // A followed thread moves out of the new list, so marking one does not show it twice.
+  const fresh = state.threads.filter(
+    (thread) => !followedKeys.has(`${thread.channelId}:${thread.ts}`),
+  );
   return (
     <>
       <div className="flex flex-col gap-1">
+        <h2 className="text-sm font-medium">Following</h2>
+        <p className="text-xs text-muted-foreground">
+          Threads you reacted to with 👀 anywhere in the workspace. Start a T3 thread from one and
+          it links back automatically.
+        </p>
+      </div>
+      {state.followed.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          React with 👀 to a thread below, or in Slack, to follow it here.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {state.followed.map((thread) => (
+            <SlackThreadItem
+              key={`${thread.channelId}:${thread.ts}`}
+              environmentId={environmentId}
+              thread={thread}
+              footer={<FollowedThreadActions environmentId={environmentId} thread={thread} />}
+            />
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-1 pt-2">
         <h2 className="text-sm font-medium">New threads</h2>
         <p className="text-xs text-muted-foreground">
           {syncLabel(state.sync)}
           {state.sync.error ? ` · ${state.sync.error}` : ""}
         </p>
       </div>
-      {state.threads.length === 0 ? (
+      {fresh.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {settling || state.sync.channelCount === 0
             ? "Threads show up here as channels are read."
@@ -101,7 +181,7 @@ function JobFeed({
         </p>
       ) : (
         <div className="flex flex-col gap-3">
-          {state.threads.map((thread) => (
+          {fresh.map((thread) => (
             <SlackThreadItem
               key={`${thread.channelId}:${thread.ts}`}
               environmentId={environmentId}
@@ -114,7 +194,7 @@ function JobFeed({
   );
 }
 
-/** Work that arrives from outside T3 Code. For now, new Slack threads. */
+/** Work that arrives from outside T3 Code: Slack threads you follow, and new ones. */
 export function JobPage() {
   useEscapeToGoBack();
   const environmentId = usePrimaryEnvironmentId();

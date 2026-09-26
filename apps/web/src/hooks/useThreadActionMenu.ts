@@ -1,4 +1,5 @@
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
+import { requestThreadOwner } from "../components/ThreadOwnerDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
   type AtomCommandResult,
@@ -21,6 +22,7 @@ import { threadEnvironment } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import {
   readEnvironmentSupportsAutoSettleOptOut,
+  readEnvironmentSupportsOwnership,
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
@@ -138,6 +140,7 @@ export function useThreadActionMenu(input: {
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
           pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
+          ownership: readEnvironmentSupportsOwnership(threadRef.environmentId),
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
@@ -237,6 +240,9 @@ export function useThreadActionMenu(input: {
             return;
           case "rename":
             onStartRename();
+            return;
+          case "assign-owner":
+            await requestThreadOwner(threadRef);
             return;
           case "regenerate-title":
             if (isRegeneratingTitle) return;

@@ -228,6 +228,14 @@ export function readEnvironmentSupportsTitleRegeneration(environmentId: Environm
   );
 }
 
+/** Whether the environment's server accepts `owner` on thread.meta.update. */
+export function readEnvironmentSupportsOwnership(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadOwnership === true
+  );
+}
+
 /** Whether the environment's server understands thread.pin.reorder (and
     orderKey on thread.pin). Same version-skew contract as settlement. */
 export function readEnvironmentSupportsPinReorder(environmentId: EnvironmentId): boolean {

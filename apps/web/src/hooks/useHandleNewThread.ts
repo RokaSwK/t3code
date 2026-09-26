@@ -40,6 +40,8 @@ interface NewThreadWorkspaceOptions {
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
   startFromOrigin?: boolean;
+  /** Slack threads the new thread is started from; linked when it is created. */
+  linkedSlackThreads?: readonly string[];
 }
 
 // The workspace options the caller passed explicitly, shaped for the draft
@@ -51,6 +53,9 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
     ...(options?.worktreePath !== undefined ? { worktreePath: options.worktreePath } : {}),
     ...(options?.envMode !== undefined ? { envMode: options.envMode } : {}),
     ...(options?.startFromOrigin !== undefined ? { startFromOrigin: options.startFromOrigin } : {}),
+    ...(options?.linkedSlackThreads !== undefined
+      ? { linkedSlackThreads: options.linkedSlackThreads }
+      : {}),
   };
 }
 
@@ -71,6 +76,7 @@ export function useNewThreadHandler() {
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
+        linkedSlackThreads?: readonly string[];
         replace?: boolean;
       },
       // Which draft the thread ended up in, so a caller that has something to put in it — a
@@ -168,6 +174,7 @@ export function useNewThreadHandler() {
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
       const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
+      const hasSlackLinksOption = options?.linkedSlackThreads !== undefined;
       const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
@@ -257,6 +264,14 @@ export function useNewThreadHandler() {
                 envMode: defaultEnvMode,
                 newWorktreesStartFromOrigin: projectSettings.settings.newWorktreesStartFromOrigin,
               }),
+              // A stale Slack link is stale context too.
+              linkedSlackThreads: [],
+            };
+          }
+          if (options?.linkedSlackThreads !== undefined) {
+            workspaceContext = {
+              ...workspaceContext,
+              linkedSlackThreads: options.linkedSlackThreads,
             };
           }
           if (workspaceContext) {
@@ -339,7 +354,8 @@ export function useNewThreadHandler() {
           hasBranchOption ||
           hasWorktreePathOption ||
           hasEnvModeOption ||
-          hasStartFromOriginOption
+          hasStartFromOriginOption ||
+          hasSlackLinksOption
         ) {
           setDraftThreadContext(currentRouteTarget.draftId, pickExplicitWorkspaceOptions(options));
         }
@@ -414,6 +430,9 @@ export function useNewThreadHandler() {
             }),
           runtimeMode: defaultRuntimeMode,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          ...(options?.linkedSlackThreads !== undefined
+            ? { linkedSlackThreads: options.linkedSlackThreads }
+            : {}),
         });
         applyStickyState(draftId);
         const modelSelectionOverride = resolveModelSelectionOverride(draftId);

@@ -1,4 +1,5 @@
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { requestThreadOwner, ThreadOwnerAvatar } from "./ThreadOwnerDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
@@ -1527,6 +1528,16 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <SlackIcon className="size-3.5" />
     </InlineButton>
   ) : null;
+  const ownerBadge = thread.owner ? (
+    <span
+      role="img"
+      aria-label={`Owned by ${thread.owner.name}`}
+      title={`Owner: ${thread.owner.name}`}
+      className="inline-flex shrink-0 items-center"
+    >
+      <ThreadOwnerAvatar owner={thread.owner} className="size-3.5" />
+    </span>
+  ) : null;
   const terminalStatusIcon = terminalStatus ? (
     <span
       role="img"
@@ -1641,6 +1652,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               the time/jump label yields to the settle affordance. */}
             {prBadge}
             {slackBadge}
+            {ownerBadge}
             {sortable?.isDragging ? (
               dragDestination
             ) : (
@@ -1950,6 +1962,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {terminalStatusIcon}
               {prBadge}
               {slackBadge}
+              {ownerBadge}
               {diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-diff-addition-foreground">+{diff.insertions}</span>{" "}
@@ -4053,6 +4066,9 @@ export default function Sidebar() {
         const supportsTitleRegeneration =
           serverConfigs.get(thread.environmentId)?.environment.capabilities
             .threadTitleRegeneration === true;
+        const supportsOwnership =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadOwnership ===
+          true;
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
@@ -4091,6 +4107,7 @@ export default function Sidebar() {
                 snooze: supportsSnooze,
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
+                ownership: supportsOwnership,
               },
               snoozePresets,
             }),
@@ -4179,6 +4196,9 @@ export default function Sidebar() {
           }
           case "rename":
             startThreadRename(threadRef, thread.title);
+            return;
+          case "assign-owner":
+            void requestThreadOwner(threadRef);
             return;
           case "regenerate-title": {
             if (isRegeneratingTitle) return;

@@ -3607,6 +3607,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.slackSetReaction, slackService.setReaction(input), {
             "rpc.aggregate": "slack",
           }),
+        [WS_METHODS.slackListMembers]: (_input) =>
+          observeRpcEffect(WS_METHODS.slackListMembers, slackService.listMembers, {
+            "rpc.aggregate": "slack",
+          }),
         [WS_METHODS.subscribeSlackState]: (_input) =>
           observeRpcStream(WS_METHODS.subscribeSlackState, slackService.state, {
             "rpc.aggregate": "slack",

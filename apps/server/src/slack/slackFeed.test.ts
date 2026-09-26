@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   isSlackThreadRoot,
   slackFeedOrder,
+  slackFollowedRefs,
   slackLatestActivityMs,
   slackPermalink,
   slackPollDelayMs,
@@ -53,6 +54,40 @@ describe("slackFeedOrder", () => {
     expect(slackFeedOrder([{ ts: "1.5" }, { ts: "10.0" }, { ts: "2.0" }], 2)).toEqual([
       { ts: "10.0" },
       { ts: "2.0" },
+    ]);
+  });
+});
+
+describe("slackFollowedRefs", () => {
+  it("keeps only messages the user marked, follows replies to their root, and dedupes", () => {
+    const eyes = (users: string[]) => [{ name: "eyes", count: users.length, users }];
+    const refs = slackFollowedRefs(
+      [
+        { type: "file", channel: "C1", message: { ts: "5.000000", reactions: eyes(["U1"]) } },
+        { type: "message", channel: "C1", message: { ts: "4.000000", reactions: eyes(["U2"]) } },
+        { type: "message", channel: "C1", message: { ts: "3.000000", reactions: eyes(["U1"]) } },
+        {
+          type: "message",
+          channel: "C1",
+          message: { ts: "3.500000", thread_ts: "3.000000", reactions: eyes(["U1"]) },
+        },
+        {
+          type: "message",
+          channel: "C2",
+          message: { ts: "2.500000", thread_ts: "2.000000", reactions: eyes(["U1"]) },
+        },
+        {
+          type: "message",
+          channel: "C1",
+          message: { ts: "1.000000", reactions: [{ name: "tada", count: 1, users: ["U1"] }] },
+        },
+      ],
+      "U1",
+      "eyes",
+    );
+    expect(refs.map((ref) => [ref.channelId, ref.ts, ref.root !== undefined])).toEqual([
+      ["C1", "3.000000", true],
+      ["C2", "2.000000", false],
     ]);
   });
 });

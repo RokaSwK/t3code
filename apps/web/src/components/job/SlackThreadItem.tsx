@@ -1,6 +1,13 @@
 import type { EnvironmentId, SlackMessage, SlackReaction, SlackThread } from "@t3tools/contracts";
-import { ExternalLinkIcon, HashIcon, LockIcon, SmilePlusIcon, UsersIcon } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ExternalLinkIcon,
+  HashIcon,
+  LockIcon,
+  MessageCircleIcon,
+  SmilePlusIcon,
+  UsersIcon,
+} from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
@@ -176,7 +183,14 @@ type RepliesState =
   | { readonly status: "error" };
 
 function ChannelGlyph({ kind }: { readonly kind: SlackThread["channelKind"] }) {
-  const Icon = kind === "private" ? LockIcon : kind === "group" ? UsersIcon : HashIcon;
+  const Icon =
+    kind === "private"
+      ? LockIcon
+      : kind === "group"
+        ? UsersIcon
+        : kind === "dm"
+          ? MessageCircleIcon
+          : HashIcon;
   return <Icon aria-hidden className="size-3" />;
 }
 
@@ -184,9 +198,12 @@ function ChannelGlyph({ kind }: { readonly kind: SlackThread["channelKind"] }) {
 export const SlackThreadItem = memo(function SlackThreadItem({
   environmentId,
   thread,
+  footer,
 }: {
   readonly environmentId: EnvironmentId;
   readonly thread: SlackThread;
+  /** Actions that belong to this thread on the page it is shown on. */
+  readonly footer?: ReactNode;
 }) {
   const setReaction = useAtomCommand(slackEnvironment.setReaction, { reportFailure: false });
   const getReplies = useAtomCommand(slackEnvironment.getReplies, { reportFailure: false });
@@ -297,6 +314,7 @@ export const SlackThreadItem = memo(function SlackThreadItem({
           ) : null}
         </div>
       ) : null}
+      {footer}
     </article>
   );
 });

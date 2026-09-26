@@ -19,6 +19,7 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
+  SLACK_FOLLOW_REACTION,
   SLACK_OAUTH_REDIRECT_URI,
   SLACK_OAUTH_LOOPBACK_PORT,
   SLACK_USER_SCOPES,
@@ -30,6 +31,7 @@ import {
   type SlackCompleteConnectInput,
   type SlackConnectInput,
   type SlackConnection,
+  type SlackMember,
   type SlackMessage,
   type SlackReaction,
   type SlackSetReactionInput,
@@ -64,7 +66,11 @@ import {
   isSlackThreadRoot,
   SLACK_CHANNEL_LIST_INTERVAL_MS,
   SLACK_FEED_WINDOW_MS,
+  SLACK_FOLLOWED_INTERVAL_MS,
   slackFeedOrder,
+  slackFollowedRefs,
+  type SlackApiReactionItem,
+  type SlackFollowedRef,
   slackLatestActivityMs,
   slackPermalink,
   slackPollDelayMs,
@@ -79,6 +85,9 @@ const AUTHORIZATION_TIMEOUT = Duration.minutes(10);
 const PUBLISH_INTERVAL_MS = 2_000;
 /** A click should fail fast rather than hang behind a long Slack pause. */
 const INTERACTIVE_MAX_WAIT_MS = 10_000;
+/** The member directory changes rarely; the owner picker reuses it this long. */
+const MEMBERS_TTL_MS = 10 * 60_000;
+const MEMBERS_MAX_PAGES = 5;
 const AUTH_ERRORS = new Set([
   "invalid_auth",
   "not_authed",
@@ -114,12 +123,18 @@ interface SlackApiChannel {
   readonly name?: string;
   readonly is_private?: boolean;
   readonly is_mpim?: boolean;
+  readonly is_im?: boolean;
+  /** The other person, for direct messages. */
+  readonly user?: string;
 }
 
 interface SlackApiUser {
   readonly id: string;
   readonly name?: string;
   readonly real_name?: string;
+  readonly deleted?: boolean;
+  readonly is_bot?: boolean;
+  readonly is_app_user?: boolean;
   readonly profile?: {
     readonly display_name?: string;
     readonly real_name?: string;
@@ -163,6 +178,8 @@ export class SlackService extends Context.Service<
       ref: SlackThreadRef,
     ) => Effect.Effect<ReadonlyArray<SlackMessage>, SlackError>;
     readonly setReaction: (input: SlackSetReactionInput) => Effect.Effect<void, SlackError>;
+    /** Workspace members, cached; who a T3 thread can be assigned to. */
+    readonly listMembers: Effect.Effect<ReadonlyArray<SlackMember>, SlackError>;
   }
 >()("t3/slack/SlackService") {}
 
@@ -182,8 +199,13 @@ function channelDisplayName(channel: SlackApiChannel): string {
 }
 
 function channelKind(channel: SlackApiChannel): SlackChannelKind {
+  if (channel.is_im) return "dm";
   if (channel.is_mpim) return "group";
   return channel.is_private ? "private" : "channel";
+}
+
+function isMember(user: SlackApiUser): boolean {
+  return !user.deleted && !user.is_bot && !user.is_app_user && user.id !== "USLACKBOT";
 }
 
 function userDisplayName(user: SlackApiUser): string {
@@ -221,6 +243,15 @@ const make = Effect.gen(function* () {
   let syncError: string | undefined;
   let dirty = false;
   let publishedAt = 0;
+  /** Threads marked with the follow reaction, newest first. */
+  let followed: ReadonlyArray<SlackThread> = [];
+  let followedRefreshedAt = 0;
+  /** Conversations followed threads live in that are not in the polled channel set. */
+  const followedChannels = new Map<
+    string,
+    { readonly name: string; readonly kind: SlackChannelKind }
+  >();
+  let members: { readonly at: number; readonly list: ReadonlyArray<SlackMember> } | undefined;
 
   const snapshot = (now: number): SlackState => {
     const rateLimitedUntil = limiter.pausedUntilMs(now);
@@ -230,6 +261,7 @@ const make = Effect.gen(function* () {
           clientId: connection.clientId,
           teamName: connection.teamName,
           teamUrl: connection.teamUrl,
+          userId: connection.userId,
           userName: connection.userName,
         }
       : authorization
@@ -257,6 +289,7 @@ const make = Effect.gen(function* () {
       threads: connection
         ? slackFeedOrder(channelStates.flatMap((channel) => channel.threads))
         : [],
+      followed: connection ? followed : [],
     };
   };
 
@@ -413,7 +446,7 @@ const make = Effect.gen(function* () {
       ...(avatarUrl ? { authorAvatarUrl: avatarUrl } : {}),
       markdown: slackMrkdwnToMarkdown(raw.text ?? "", {
         userName: (id) => users.get(id)?.name,
-        channelName: (id) => channels.get(id)?.name,
+        channelName: (id) => channels.get(id)?.name ?? followedChannels.get(id)?.name,
       }),
       fileCount: raw.files?.length ?? 0,
       edited: raw.edited !== undefined,
@@ -519,9 +552,104 @@ const make = Effect.gen(function* () {
     lastSyncedAt = now;
   });
 
+  // ---------------------------------------------------------------------------
+  // Followed threads
+
+  /** A conversation's name and kind, from the polled set or looked up once. */
+  const describeChannel = Effect.fn("slack.describe_channel")(function* (
+    channelId: string,
+    priority: SlackCallPriority,
+  ) {
+    const polled = channels.get(channelId);
+    if (polled) return { name: polled.name, kind: polled.kind };
+    const known = followedChannels.get(channelId);
+    if (known) return known;
+    const info = yield* call("conversations.info", { channel: channelId }, priority);
+    const channel = info.channel as SlackApiChannel | undefined;
+    if (!channel) return yield* slackError("describe_channel", "Slack channel is unavailable.");
+    let name = channelDisplayName(channel);
+    if (channel.is_im && channel.user) {
+      yield* ensureUsers([channel.user], priority);
+      name = users.get(channel.user)?.name ?? name;
+    }
+    const described = { name, kind: channelKind(channel) };
+    followedChannels.set(channelId, described);
+    return described;
+  });
+
+  const followedThread = Effect.fn("slack.followed_thread")(function* (
+    ref: SlackFollowedRef,
+    priority: SlackCallPriority,
+  ) {
+    const channel = yield* describeChannel(ref.channelId, priority);
+    let root = ref.root;
+    // A followed reply, or a root without its reply count, needs the conversation itself.
+    if (!root || root.reply_count === undefined) {
+      const body = yield* call(
+        "conversations.replies",
+        { channel: ref.channelId, ts: ref.ts, limit: "1" },
+        priority,
+      );
+      root = ((body.messages as SlackApiMessage[] | undefined) ?? []).find(
+        (message) => message.ts === ref.ts,
+      );
+    }
+    if (!root) return undefined;
+    const [message] = yield* resolveMessages(ref.channelId, [root], priority);
+    if (!message) return undefined;
+    const thread: SlackThread = {
+      ...message,
+      channelName: channel.name,
+      channelKind: channel.kind,
+      permalink: slackPermalink(connection?.teamUrl ?? "https://slack.com/", ref.channelId, ref.ts),
+    };
+    return thread;
+  });
+
+  /** Re-reads the user's reactions; the follow mark lives in Slack, not here. */
+  const refreshFollowed = Effect.fn("slack.refresh_followed")(function* (
+    priority: SlackCallPriority,
+  ) {
+    const current = connection;
+    if (!current) return;
+    const items: SlackApiReactionItem[] = [];
+    let cursor = "";
+    for (let page = 0; page < 3; page += 1) {
+      const body = yield* call(
+        "reactions.list",
+        { user: current.userId, full: "true", limit: "200", ...(cursor ? { cursor } : {}) },
+        priority,
+      );
+      items.push(...((body.items as SlackApiReactionItem[] | undefined) ?? []));
+      cursor = (body.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "";
+      if (!cursor) break;
+    }
+    const refs = slackFollowedRefs(items, current.userId, SLACK_FOLLOW_REACTION);
+    const threads: SlackThread[] = [];
+    for (const ref of refs) {
+      // One unreadable conversation should not hide the rest.
+      const thread = yield* followedThread(ref, priority).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      if (thread) threads.push(thread);
+    }
+    if (!sameThreads(threads, followed)) {
+      followed = threads;
+      dirty = true;
+    }
+    followedRefreshedAt = yield* Clock.currentTimeMillis;
+  });
+
   const syncLoop = Effect.gen(function* () {
     for (;;) {
       const now = yield* Clock.currentTimeMillis;
+      if (now - followedRefreshedAt >= SLACK_FOLLOWED_INTERVAL_MS) {
+        const refreshed = yield* Effect.exit(refreshFollowed("background"));
+        if (Exit.isFailure(refreshed)) {
+          // Retry in a minute; the channel feed keeps going meanwhile.
+          followedRefreshedAt = now - SLACK_FOLLOWED_INTERVAL_MS + 60_000;
+        }
+      }
       if (now - channelsListedAt >= SLACK_CHANNEL_LIST_INTERVAL_MS) {
         const listed = yield* Effect.exit(listChannels());
         if (Exit.isFailure(listed)) {
@@ -553,6 +681,7 @@ const make = Effect.gen(function* () {
       const nextAt = Math.min(
         due?.nextPollAt ?? Number.POSITIVE_INFINITY,
         channelsListedAt + SLACK_CHANNEL_LIST_INTERVAL_MS,
+        followedRefreshedAt + SLACK_FOLLOWED_INTERVAL_MS,
       );
       yield* Effect.raceFirst(
         Effect.sleep(Duration.millis(Math.max(1_000, nextAt - now))),
@@ -576,6 +705,10 @@ const make = Effect.gen(function* () {
     channelsListedAt = 0;
     lastSyncedAt = undefined;
     syncError = undefined;
+    followed = [];
+    followedRefreshedAt = 0;
+    followedChannels.clear();
+    members = undefined;
     syncFiber = yield* syncLoop.pipe(Effect.forkIn(layerScope));
   });
 
@@ -594,6 +727,8 @@ const make = Effect.gen(function* () {
       connectionError = error;
       yield* stopSync;
       channels.clear();
+      followed = [];
+      members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
       yield* publish;
     });
@@ -792,6 +927,7 @@ const make = Effect.gen(function* () {
 
   const refresh = Effect.gen(function* () {
     channelsListedAt = 0;
+    followedRefreshedAt = 0;
     for (const channel of channels.values()) channel.nextPollAt = 0;
     yield* Deferred.succeed(wake, undefined);
   });
@@ -861,10 +997,24 @@ const make = Effect.gen(function* () {
         () => Effect.succeed(undefined),
       ),
     );
+    if (input.name === SLACK_FOLLOW_REACTION) {
+      // The mark changed in Slack; read it back soon. Unfollowing hides the thread right away.
+      followedRefreshedAt = 0;
+      if (!input.reacted) {
+        followed = followed.filter(
+          (candidate) => !(candidate.channelId === input.channelId && candidate.ts === input.ts),
+        );
+        dirty = true;
+      }
+      yield* Deferred.succeed(wake, undefined);
+    }
     // Patch the feed now instead of waiting for the next read of the channel.
     const channel = channels.get(input.channelId);
     const thread = channel?.threads.find((candidate) => candidate.ts === input.ts);
-    if (!channel || !thread) return;
+    if (!channel || !thread) {
+      if (dirty) yield* publish;
+      return;
+    }
     const existing = thread.reactions.find((reaction) => reaction.name === input.name);
     const reactions = existing
       ? thread.reactions
@@ -887,8 +1037,47 @@ const make = Effect.gen(function* () {
     channel.threads = channel.threads.map((candidate) =>
       candidate === thread ? { ...thread, reactions } : candidate,
     );
+    if (input.name === SLACK_FOLLOW_REACTION && input.reacted) {
+      // Show it under Following right away; the next read confirms it.
+      const marked = { ...thread, reactions };
+      followed = slackFeedOrder([
+        marked,
+        ...followed.filter(
+          (candidate) => !(candidate.channelId === marked.channelId && candidate.ts === marked.ts),
+        ),
+      ]);
+    }
     yield* publish;
   });
+
+  const listMembers = Effect.gen(function* () {
+    if (!connection) return yield* slackError("list_members", "Slack is not connected.");
+    const now = yield* Clock.currentTimeMillis;
+    if (members && now - members.at < MEMBERS_TTL_MS) return members.list;
+    const listed: SlackApiUser[] = [];
+    let cursor = "";
+    for (let page = 0; page < MEMBERS_MAX_PAGES; page += 1) {
+      const body = yield* call(
+        "users.list",
+        { limit: "200", ...(cursor ? { cursor } : {}) },
+        "interactive",
+      );
+      listed.push(...((body.members as SlackApiUser[] | undefined) ?? []));
+      cursor = (body.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "";
+      if (!cursor) break;
+    }
+    const list = listed
+      .filter(isMember)
+      .map((user): SlackMember => {
+        const name = userDisplayName(user);
+        const avatarUrl = user.profile?.image_48;
+        users.set(user.id, { name, ...(avatarUrl ? { avatarUrl } : {}) });
+        return { userId: user.id, name, ...(avatarUrl ? { avatarUrl } : {}) };
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+    members = { at: now, list };
+    return list;
+  }).pipe(Effect.withSpan("slack.list_members"));
 
   const stored = yield* secrets.get(CONNECTION_SECRET).pipe(
     Effect.map(Option.flatMap((bytes) => decodeStoredConnection(new TextDecoder().decode(bytes)))),
@@ -911,6 +1100,7 @@ const make = Effect.gen(function* () {
     getThread,
     getReplies,
     setReaction,
+    listMembers,
   });
 });
 

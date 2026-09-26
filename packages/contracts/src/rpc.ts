@@ -264,6 +264,7 @@ import {
   SlackThreadRef,
   SlackGetThreadInput,
   SlackThreadDetail,
+  SlackMember,
 } from "./slack.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -381,6 +382,7 @@ export const WS_METHODS = {
   slackGetThread: "slack.getThread",
   slackGetReplies: "slack.getReplies",
   slackSetReaction: "slack.setReaction",
+  slackListMembers: "slack.listMembers",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1342,6 +1344,13 @@ const WsSlackSetReactionRpc = Rpc.make(WS_METHODS.slackSetReaction, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+/** Workspace members who can be assigned as thread owners. */
+const WsSlackListMembersRpc = Rpc.make(WS_METHODS.slackListMembers, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(SlackMember),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeSlackStateRpc = Rpc.make(WS_METHODS.subscribeSlackState, {
   payload: Schema.Struct({}),
   success: SlackState,
@@ -1608,6 +1617,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackGetThreadRpc,
   WsSlackGetRepliesRpc,
   WsSlackSetReactionRpc,
+  WsSlackListMembersRpc,
   WsSubscribeSlackStateRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

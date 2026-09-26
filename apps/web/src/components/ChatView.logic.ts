@@ -490,6 +490,9 @@ export function buildLocalDraftThread(
     latestTurn: null,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
+    ...(draftThread.linkedSlackThreads?.length
+      ? { linkedSlackThreads: draftThread.linkedSlackThreads }
+      : {}),
     checkpoints: [],
     pullRequests: [],
     activities: [],
