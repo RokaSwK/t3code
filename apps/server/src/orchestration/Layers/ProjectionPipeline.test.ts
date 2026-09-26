@@ -10,6 +10,7 @@ import {
   ThreadId,
   type ThreadPullRequestSnapshot,
   ThreadLinkedPullRequest,
+  ThreadSlackLinks,
   TurnId,
   ProviderInstanceId,
 } from "@t3tools/contracts";
@@ -66,6 +67,7 @@ const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pip
 const encodeThreadLinkedPullRequest = Schema.encodeSync(
   Schema.fromJsonString(ThreadLinkedPullRequest),
 );
+const encodeThreadSlackLinks = Schema.encodeSync(Schema.fromJsonString(ThreadSlackLinks));
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-cursor-batch-")))(
   "OrchestrationProjectionPipeline cursor batches",
@@ -357,7 +359,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-branch-pr-proje
           assert.deepEqual(rows, [
             {
               linkedPullRequest: encodeThreadLinkedPullRequest(linkedPullRequest),
-              slackLinks: JSON.stringify([
+              slackLinks: encodeThreadSlackLinks([
                 "https://acme.slack.com/archives/C123/p1790000000000000",
               ]),
               branchPullRequest:
