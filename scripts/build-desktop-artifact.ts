@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+import {
+  forkDesktopChannel,
+  forkDesktopFeedUrl,
+} from "../packages/shared/src/desktopReleaseChannels.ts";
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
 import * as NodeFSP from "node:fs/promises";
@@ -2535,7 +2539,7 @@ export function resolveDesktopRuntimeDependencies(
 }
 
 export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig")(function* (
-  updateChannel: "latest" | "nightly",
+  updateChannel: "latest" | "nightly" | "personal",
 ) {
   const env = yield* Config.all({
     updateRepository: Config.string("T3CODE_DESKTOP_UPDATE_REPOSITORY").pipe(Config.option),
@@ -2560,7 +2564,9 @@ export const resolveGitHubPublishConfig = Effect.fn("resolveGitHubPublishConfig"
   };
 });
 
-export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" {
+export function resolveDesktopUpdateChannel(version: string): "latest" | "nightly" | "personal" {
+  const forkChannel = forkDesktopChannel(version);
+  if (forkChannel) return forkChannel;
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
@@ -2576,10 +2582,40 @@ export function isDesktopPreviewVersion(version: string): boolean {
 }
 
 export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
-  return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
+  if (isDesktopPersonalVersion(version)) return "personal";
+  const channel = resolveDesktopUpdateChannel(version);
+  return channel === "personal" ? "personal" : resolveWebAssetBrandForChannel(channel);
+}
+
+/**
+ * Local builds of a personal fork (`<version>-personal.<stamp>`) install beside
+ * an official app: their own name, bundle id, red icon, and URL scheme, and no
+ * update feed that could replace them with an official release.
+ */
+export function isDesktopPersonalVersion(version: string): boolean {
+  return forkDesktopChannel(version) === "personal" || /^[^-+]+-personal\.\d+$/.test(version);
+}
+
+function resolveDesktopAppId(version: string): string {
+  return isDesktopPersonalVersion(version) || forkDesktopChannel(version) !== null
+    ? `${DESKTOP_APP_ID}.personal`
+    : DESKTOP_APP_ID;
+}
+
+function resolveDesktopUrlSchemes(version: string): string[] {
+  return isDesktopPersonalVersion(version) || forkDesktopChannel(version) !== null
+    ? ["t3code-personal"]
+    : ["t3code", "t3code-dev"];
 }
 
 export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+  if (isDesktopPersonalVersion(version)) {
+    return {
+      macIconPng: BRAND_ASSET_PATHS.personalMacIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.personalLinuxIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
+    };
+  }
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
@@ -2613,6 +2649,8 @@ export function resolvePackageManagerUserAgent(packageManager: string): string {
 }
 
 export function resolveDesktopProductName(version: string): string {
+  if (forkDesktopChannel(version) !== null) return "T3 Code";
+  if (isDesktopPersonalVersion(version)) return "T3 Code (Personal)";
   return resolveDesktopUpdateChannel(version) === "nightly"
     ? "T3 Code (Nightly)"
     : (desktopPackageJson.productName ?? "T3 Code");
@@ -2638,7 +2676,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   arch?: typeof BuildArch.Type,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
+    appId: resolveDesktopAppId(version),
     productName: resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
@@ -2668,7 +2706,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     ],
   };
   const updateChannel = resolveDesktopUpdateChannel(version);
-  if (!isDesktopPreviewVersion(version)) {
+  const forkChannel = forkDesktopChannel(version);
+  if (forkChannel !== null) {
+    // Unsigned downloads remain usable manually; never advertise an installable update feed.
+    if (signed)
+      buildConfig.publish = [
+        { provider: "generic", url: forkDesktopFeedUrl(forkChannel), channel: forkChannel },
+      ];
+  } else if (!isDesktopPreviewVersion(version) && !isDesktopPersonalVersion(version)) {
     const publishConfig = yield* resolveGitHubPublishConfig(updateChannel);
     if (publishConfig) {
       buildConfig.publish = [publishConfig];
@@ -2696,7 +2741,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: resolveDesktopUrlSchemes(version),
         },
       ],
       ...(signed ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") } : {}),
@@ -2743,7 +2788,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "T3 Code",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: resolveDesktopUrlSchemes(version),
         },
       ],
       desktop: {

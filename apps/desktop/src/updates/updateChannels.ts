@@ -1,3 +1,4 @@
+import { forkDesktopChannel } from "@t3tools/shared/desktopReleaseChannels";
 import type { DesktopUpdateChannel } from "@t3tools/contracts";
 
 const NIGHTLY_VERSION_PATTERN = /^[^-+]+-nightly\.\d{8}\.\d+$/;
@@ -10,9 +11,17 @@ const NIGHTLY_VERSION_PATTERN = /^[^-+]+-nightly\.\d{8}\.\d+$/;
 const PRERELEASE_VERSION_PATTERN = /^[^-+]+-(?:nightly|preview)\.\d{8}\.\d+$/;
 
 export function isNightlyDesktopVersion(version: string): boolean {
-  return PRERELEASE_VERSION_PATTERN.test(version);
+  return forkDesktopChannel(version) === "nightly" || PRERELEASE_VERSION_PATTERN.test(version);
+}
+
+/** Includes legacy local builds and the Personal release track. */
+export function isPersonalDesktopVersion(version: string): boolean {
+  return forkDesktopChannel(version) === "personal" || /^[^-+]+-personal\.\d+$/.test(version);
 }
 
 export function resolveDefaultDesktopUpdateChannel(appVersion: string): DesktopUpdateChannel {
+  const forkChannel = forkDesktopChannel(appVersion);
+  if (forkChannel) return forkChannel;
+  if (isPersonalDesktopVersion(appVersion)) return "personal";
   return NIGHTLY_VERSION_PATTERN.test(appVersion) ? "nightly" : "latest";
 }

@@ -19,6 +19,41 @@ import * as DesktopUpdates from "./DesktopUpdates.ts";
 import { flushCallbacks, makeHarness } from "./updatesTestHarness.ts";
 
 describe("DesktopUpdates", () => {
+  it.effect("switches fork feeds both ways without following upstream releases", () => {
+    const harness = makeHarness({
+      appVersion: "1.2.3-fork.personal.20260926",
+      appUpdateYml:
+        "provider: generic\nurl: https://github.com/RokaSwK/t3code/releases/download/desktop-personal",
+      env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        yield* updates.setChannel("nightly");
+        harness.emit("update-available", { version: "1.2.4-fork.nightly.20260927" });
+        yield* flushCallbacks;
+        assert.equal((yield* updates.getState).availableVersion, "1.2.4-fork.nightly.20260927");
+        yield* updates.setChannel("personal");
+        harness.emit("update-available", { version: "1.2.4-nightly.20260927.1" });
+        yield* flushCallbacks;
+        assert.isNull((yield* updates.getState).availableVersion);
+        yield* updates.setChannel("latest");
+        assert.deepEqual(
+          harness
+            .feedUrls()
+            .map((feed) => (typeof feed === "string" ? feed : "url" in feed ? feed.url : null)),
+          [
+            "https://github.com/RokaSwK/t3code/releases/download/desktop-personal",
+            "https://github.com/RokaSwK/t3code/releases/download/desktop-nightly",
+            "https://github.com/RokaSwK/t3code/releases/download/desktop-personal",
+            "https://github.com/RokaSwK/t3code/releases/download/desktop-stable",
+          ],
+        );
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it("preserves complete causes for update poller and event failures", () => {
     const cause = Cause.combine(
       Cause.fail(new Error("updater failed")),

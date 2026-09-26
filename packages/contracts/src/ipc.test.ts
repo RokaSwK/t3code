@@ -1,7 +1,22 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
-import { DesktopEnvironmentBootstrapSchema } from "./ipc.ts";
+import { DesktopAppBrandingSchema, DesktopEnvironmentBootstrapSchema } from "./ipc.ts";
+
+const encodeBranding = Schema.encodeSync(DesktopAppBrandingSchema);
+const decodeBranding = Schema.decodeSync(DesktopAppBrandingSchema);
+
+describe("DesktopAppBrandingSchema", () => {
+  it("allows personal build branding across the desktop bridge", () => {
+    const branding = {
+      baseName: "T3 Code",
+      stageLabel: "Personal" as const,
+      displayName: "T3 Code (Personal)",
+    };
+    expect(encodeBranding(branding)).toEqual(branding);
+    expect(decodeBranding(branding)).toEqual(branding);
+  });
+});
 
 describe("DesktopEnvironmentBootstrapSchema", () => {
   const decode = Schema.decodeUnknownSync(DesktopEnvironmentBootstrapSchema);

@@ -330,6 +330,10 @@
     "./cliRelease": {
       "types": "./src/cliRelease.ts",
       "import": "./src/cliRelease.ts"
+    },
+    "./desktopReleaseChannels": {
+      "types": "./src/desktopReleaseChannels.ts",
+      "import": "./src/desktopReleaseChannels.ts"
     }
   },
   "scripts": {

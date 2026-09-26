@@ -5,8 +5,8 @@ import { APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppStageLabel } from "../branding.logic";
 import { primaryServerConfigAtom } from "../state/server";
 
-export type SidebarStageBackdropVariant = "nightly" | "dev";
-export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly";
+export type SidebarStageBackdropVariant = "nightly" | "dev" | "personal";
+export type EnvironmentIdentificationPillLabel = "Dev" | "Nightly" | "Personal";
 
 // A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
 // more horizontal canvas instead of zooming the scene.
@@ -20,6 +20,7 @@ export function resolveSidebarStageBackdropVariant(
   const normalized = stageLabel.trim().toLowerCase();
   if (normalized === "nightly") return "nightly";
   if (normalized === "dev") return "dev";
+  if (normalized === "personal") return "personal";
   return null;
 }
 
@@ -37,6 +38,7 @@ export function resolveEnvironmentIdentificationPillLabel(
   const normalized = stageLabel.trim().toLowerCase();
   if (normalized === "dev") return "Dev";
   if (normalized === "nightly") return "Nightly";
+  if (normalized === "personal") return "Personal";
   return null;
 }
 
@@ -67,11 +69,19 @@ export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdro
 }
 
 export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return variant === "nightly" ? <NightlySkyArt /> : <DevBlueprintArt />;
+  return variant === "nightly" ? (
+    <NightlySkyArt />
+  ) : (
+    <DevBlueprintArt red={variant === "personal"} />
+  );
 }
 
 export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  return variant === "nightly" ? <NightlySkyArt compact /> : <DevBlueprintArt compact />;
+  return variant === "nightly" ? (
+    <NightlySkyArt compact />
+  ) : (
+    <DevBlueprintArt compact red={variant === "personal"} />
+  );
 }
 
 const NIGHTLY_STARS: ReadonlyArray<{
@@ -216,7 +226,8 @@ function NightlySkyArt({ compact = false }: { compact?: boolean }) {
   );
 }
 
-function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
+/** `red` is the personal build's palette: the same drafting sheet, matching its red app icon. */
+function DevBlueprintArt({ compact = false, red = false }: { compact?: boolean; red?: boolean }) {
   const idPrefix = useId().replaceAll(":", "");
   const paperId = `${idPrefix}-stage-bp-paper`;
   const glowId = `${idPrefix}-stage-bp-glow`;
@@ -230,6 +241,7 @@ function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
 
   return (
     <svg
+      data-stage-art={red ? "blueprint-red" : "blueprint"}
       className="stage-art stage-blueprint h-full w-full"
       fill="none"
       preserveAspectRatio="xMinYMin slice"
