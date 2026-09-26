@@ -27,12 +27,17 @@ from T3 Code. Direct messages are not included.
 Busy channels are checked every 30 seconds and quiet ones less often, within Slack's rate limits.
 If Slack asks T3 Code to slow down, the page shows when checking resumes.
 
+Use **Channels** beside New threads to exclude channels from the feed. Excluded channels are not
+checked for new threads; threads you follow in them still appear under Following. Use **Dismiss**
+to hide one new thread, and **Show dismissed** to restore it.
+
 ## Follow threads with 👀
 
 React to a Slack message with 👀, from T3 Code or from Slack itself, and its thread appears under
 **Following** at the top of the Job page. Following works anywhere in your workspace, including
 direct messages and threads older than the feed window, and it stays until you remove the
 reaction. Marking a reply follows its parent thread.
+Choose **Unfollow** on the Job page to remove your 👀 reactions from that conversation.
 
 Choose **Start thread** on a followed thread and pick the project folder to work in. The new
 thread opens as a draft; when you send the first message it is created already linked to the

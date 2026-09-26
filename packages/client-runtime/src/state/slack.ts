@@ -57,6 +57,14 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:set-dismissed",
       tag: WS_METHODS.slackSetDismissed,
     }),
+    getChannels: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:get-channels",
+      tag: WS_METHODS.slackGetChannels,
+    }),
+    setChannelExcluded: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-channel-excluded",
+      tag: WS_METHODS.slackSetChannelExcluded,
+    }),
     /** Workspace members for the thread owner picker. */
     listMembers: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:list-members",

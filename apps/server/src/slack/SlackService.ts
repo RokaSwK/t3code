@@ -36,6 +36,8 @@ import {
   type SlackReaction,
   type SlackSetReactionInput,
   type SlackSetDismissedInput,
+  type SlackSetChannelExcludedInput,
+  type SlackChannel,
   type SlackState,
   SlackThread,
   SlackThreadRef,
@@ -85,6 +87,7 @@ const CONNECTION_SECRET = "slack-connection";
 /** The app last signed in with, kept across sign-outs so reconnecting is one click. */
 const CLIENT_ID_SECRET = "slack-client-id";
 const DISMISSED_SECRET = "slack-dismissed-threads";
+const EXCLUDED_CHANNELS_SECRET = "slack-excluded-channels";
 const AUTHORIZATION_TIMEOUT = Duration.minutes(10);
 /** Snapshots go out at most this often while channels sync. */
 const PUBLISH_INTERVAL_MS = 2_000;
@@ -123,6 +126,17 @@ const StoredDismissed = Schema.Struct({
 });
 const decodeStoredDismissed = Schema.decodeUnknownOption(Schema.fromJsonString(StoredDismissed));
 const encodeStoredDismissed = Schema.encodeSync(Schema.fromJsonString(StoredDismissed));
+const StoredExcludedChannels = Schema.Struct({
+  teamUrl: Schema.String,
+  userId: Schema.String,
+  channelIds: Schema.Array(Schema.String),
+});
+const decodeStoredExcludedChannels = Schema.decodeUnknownOption(
+  Schema.fromJsonString(StoredExcludedChannels),
+);
+const encodeStoredExcludedChannels = Schema.encodeSync(
+  Schema.fromJsonString(StoredExcludedChannels),
+);
 
 /** Every Slack Web API response; method-specific fields are read where used. */
 interface SlackResponse {
@@ -193,6 +207,10 @@ export class SlackService extends Context.Service<
     readonly setReaction: (input: SlackSetReactionInput) => Effect.Effect<void, SlackError>;
     readonly unfollow: (ref: SlackThreadRef) => Effect.Effect<void, SlackError>;
     readonly setDismissed: (input: SlackSetDismissedInput) => Effect.Effect<void, SlackError>;
+    readonly getChannels: Effect.Effect<ReadonlyArray<SlackChannel>, SlackError>;
+    readonly setChannelExcluded: (
+      input: SlackSetChannelExcludedInput,
+    ) => Effect.Effect<void, SlackError>;
     /** Workspace members, cached; who a T3 thread can be assigned to. */
     readonly listMembers: Effect.Effect<ReadonlyArray<SlackMember>, SlackError>;
   }
@@ -262,6 +280,8 @@ const make = Effect.gen(function* () {
   let followed: ReadonlyArray<SlackThread> = [];
   let dismissed: ReadonlyArray<SlackThreadRef> = [];
   const dismissedWrites = yield* Semaphore.make(1);
+  let excludedChannelIds = new Set<string>();
+  const exclusionWrites = yield* Semaphore.make(1);
   let followedRefreshedAt = 0;
   /** Conversations followed threads live in that are not in the polled channel set. */
   const followedChannels = new Map<
@@ -293,11 +313,14 @@ const make = Effect.gen(function* () {
             ...(lastClientId ? { clientId: lastClientId } : {}),
             ...(connectionError ? { error: connectionError } : {}),
           };
-    const channelStates = [...channels.values()];
+    const channelStates = [...channels.values()].filter(
+      (channel) => !excludedChannelIds.has(channel.id),
+    );
     return {
       connection: connectionState,
       sync: {
         channelCount: channelStates.length,
+        availableChannelCount: channels.size,
         syncedChannelCount: channelStates.filter((channel) => channel.synced).length,
         ...(lastSyncedAt ? { lastSyncedAt: isoTime(lastSyncedAt) } : {}),
         ...(rateLimitedUntil ? { rateLimitedUntil: isoTime(rateLimitedUntil) } : {}),
@@ -308,6 +331,7 @@ const make = Effect.gen(function* () {
         : [],
       followed: connection ? followed : [],
       dismissed: connection ? dismissed : [],
+      excludedChannelIds: connection ? [...excludedChannelIds] : [],
     };
   };
 
@@ -333,6 +357,23 @@ const make = Effect.gen(function* () {
       stored.value.userId === connection.userId
         ? stored.value.threads.filter((thread) => Number.parseFloat(thread.ts) * 1000 > cutoff)
         : [];
+  });
+
+  const loadExcludedChannels = Effect.gen(function* () {
+    const stored = yield* secrets.get(EXCLUDED_CHANNELS_SECRET).pipe(
+      Effect.map(
+        Option.flatMap((bytes) => decodeStoredExcludedChannels(new TextDecoder().decode(bytes))),
+      ),
+      Effect.orElseSucceed(() => Option.none<typeof StoredExcludedChannels.Type>()),
+    );
+    excludedChannelIds = new Set(
+      connection &&
+        Option.isSome(stored) &&
+        stored.value.teamUrl === connection.teamUrl &&
+        stored.value.userId === connection.userId
+        ? stored.value.channelIds
+        : [],
+    );
   });
 
   // ---------------------------------------------------------------------------
@@ -693,6 +734,7 @@ const make = Effect.gen(function* () {
       }
       let due: ChannelState | undefined;
       for (const channel of channels.values()) {
+        if (excludedChannelIds.has(channel.id)) continue;
         if (due === undefined || channel.nextPollAt < due.nextPollAt) due = channel;
       }
       if (due !== undefined && due.nextPollAt <= now) {
@@ -762,6 +804,7 @@ const make = Effect.gen(function* () {
       channels.clear();
       followed = [];
       dismissed = [];
+      excludedChannelIds = new Set();
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
       yield* publish;
@@ -819,6 +862,7 @@ const make = Effect.gen(function* () {
     yield* persist(next);
     connection = next;
     yield* loadDismissed;
+    yield* loadExcludedChannels;
     connectionError = undefined;
     lastClientId = next.clientId;
     if (authorization === pending) yield* endAuthorization(true);
@@ -1124,6 +1168,52 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const getChannels = Effect.gen(function* () {
+    if (!connection) return yield* slackError("get_channels", "Slack is not connected.");
+    return [...channels.values()]
+      .map((channel) => ({ id: channel.id, name: channel.name, kind: channel.kind }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  });
+
+  const setChannelExcluded = Effect.fn("slack.set_channel_excluded")(function* (
+    input: SlackSetChannelExcludedInput,
+  ) {
+    yield* exclusionWrites.withPermit(
+      Effect.gen(function* () {
+        const current = connection;
+        if (!current) return yield* slackError("set_channel_excluded", "Slack is not connected.");
+        const channel = channels.get(input.channelId);
+        if (!channel) return yield* slackError("set_channel_excluded", "Channel is unavailable.");
+        if (excludedChannelIds.has(input.channelId) === input.excluded) return;
+        const next = new Set(excludedChannelIds);
+        if (input.excluded) next.add(input.channelId);
+        else next.delete(input.channelId);
+        yield* secrets
+          .set(
+            EXCLUDED_CHANNELS_SECRET,
+            new TextEncoder().encode(
+              encodeStoredExcludedChannels({
+                teamUrl: current.teamUrl,
+                userId: current.userId,
+                channelIds: [...next],
+              }),
+            ),
+          )
+          .pipe(
+            Effect.mapError(() =>
+              slackError("set_channel_excluded", "Could not save channel exclusions."),
+            ),
+          );
+        excludedChannelIds = next;
+        channel.threads = [];
+        channel.synced = false;
+        channel.nextPollAt = 0;
+        yield* publish;
+        if (!input.excluded) yield* Deferred.succeed(wake, undefined);
+      }),
+    );
+  });
+
   const unfollow = Effect.fn("slack.unfollow")(function* (ref: SlackThreadRef) {
     const current = connection;
     if (!current) return yield* slackError("unfollow", "Slack is not connected.");
@@ -1230,6 +1320,7 @@ const make = Effect.gen(function* () {
   if (Option.isSome(stored)) {
     connection = stored.value;
     yield* loadDismissed;
+    yield* loadExcludedChannels;
     lastClientId = stored.value.clientId;
     yield* startSync;
   }
@@ -1247,6 +1338,8 @@ const make = Effect.gen(function* () {
     setReaction,
     unfollow,
     setDismissed,
+    getChannels,
+    setChannelExcluded,
     listMembers,
   });
 });

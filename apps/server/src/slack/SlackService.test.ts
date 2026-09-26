@@ -166,7 +166,7 @@ const waitForState = (predicate: (state: SlackState) => boolean) =>
   });
 
 describe("SlackService", () => {
-  it.live("persists dismissed threads and restores them across service restarts", () => {
+  it.live("persists dismissed threads and channel exclusions across service restarts", () => {
     const calls: Array<SlackCall> = [];
     const rateLimited = new Set<string>();
     const secrets = new Map<string, Uint8Array>([
@@ -199,6 +199,19 @@ describe("SlackService", () => {
         assert.deepStrictEqual(dismissed.dismissed, [
           { channelId: thread.channelId, ts: thread.ts },
         ]);
+        assert.deepStrictEqual(yield* slack.getChannels, [
+          { id: "C1", name: "general", kind: "channel" },
+        ]);
+        yield* slack.setChannelExcluded({ channelId: "C1", excluded: true });
+        const excluded = yield* waitForState((state) => state.excludedChannelIds.length === 1);
+        assert.deepStrictEqual(excluded.excludedChannelIds, ["C1"]);
+        assert.strictEqual(excluded.sync.channelCount, 0);
+        assert.strictEqual(excluded.sync.availableChannelCount, 1);
+        assert.deepStrictEqual(excluded.threads, []);
+        const stillFollowed = yield* waitForState(
+          (state) => state.excludedChannelIds.length === 1 && state.followed.length === 2,
+        );
+        assert.isTrue(stillFollowed.followed.some((item) => item.channelId === "C1"));
         return thread;
       }).pipe(Effect.provide(layer));
 
@@ -208,6 +221,17 @@ describe("SlackService", () => {
         assert.deepStrictEqual(restored.dismissed, [
           { channelId: thread.channelId, ts: thread.ts },
         ]);
+        const excluded = yield* waitForState(
+          (state) =>
+            state.excludedChannelIds.length === 1 && state.sync.availableChannelCount === 1,
+        );
+        assert.deepStrictEqual(excluded.threads, []);
+        assert.strictEqual(excluded.sync.channelCount, 0);
+        yield* slack.setChannelExcluded({ channelId: "C1", excluded: false });
+        const included = yield* waitForState(
+          (state) => state.excludedChannelIds.length === 0 && state.threads.length === 1,
+        );
+        assert.strictEqual(included.sync.channelCount, 1);
         yield* slack.setDismissed({ channelId: thread.channelId, ts: thread.ts, dismissed: false });
         const visible = yield* waitForState((state) => state.dismissed.length === 0);
         assert.deepStrictEqual(visible.dismissed, []);

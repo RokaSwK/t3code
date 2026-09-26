@@ -257,10 +257,12 @@ import {
   SlackCompleteConnectInput,
   SlackConnectInput,
   SlackConnection,
+  SlackChannel,
   SlackError,
   SlackMessage,
   SlackSetReactionInput,
   SlackSetDismissedInput,
+  SlackSetChannelExcludedInput,
   SlackState,
   SlackThreadRef,
   SlackGetThreadInput,
@@ -385,6 +387,8 @@ export const WS_METHODS = {
   slackSetReaction: "slack.setReaction",
   slackUnfollow: "slack.unfollow",
   slackSetDismissed: "slack.setDismissed",
+  slackGetChannels: "slack.getChannels",
+  slackSetChannelExcluded: "slack.setChannelExcluded",
   slackListMembers: "slack.listMembers",
 
   // Server meta
@@ -1358,6 +1362,17 @@ const WsSlackSetDismissedRpc = Rpc.make(WS_METHODS.slackSetDismissed, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+const WsSlackGetChannelsRpc = Rpc.make(WS_METHODS.slackGetChannels, {
+  payload: Schema.Struct({}),
+  success: Schema.Array(SlackChannel),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsSlackSetChannelExcludedRpc = Rpc.make(WS_METHODS.slackSetChannelExcluded, {
+  payload: SlackSetChannelExcludedInput,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 /** Workspace members who can be assigned as thread owners. */
 const WsSlackListMembersRpc = Rpc.make(WS_METHODS.slackListMembers, {
   payload: Schema.Struct({}),
@@ -1633,6 +1648,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackSetReactionRpc,
   WsSlackUnfollowRpc,
   WsSlackSetDismissedRpc,
+  WsSlackGetChannelsRpc,
+  WsSlackSetChannelExcludedRpc,
   WsSlackListMembersRpc,
   WsSubscribeSlackStateRpc,
   WsSubscribeServerConfigRpc,

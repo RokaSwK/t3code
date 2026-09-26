@@ -66,6 +66,13 @@ export function slackCreateAppUrl(): string {
 export const SlackChannelKind = Schema.Literals(["channel", "private", "group", "dm"]);
 export type SlackChannelKind = typeof SlackChannelKind.Type;
 
+export const SlackChannel = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: SlackChannelKind,
+});
+export type SlackChannel = typeof SlackChannel.Type;
+
 export const SlackReaction = Schema.Struct({
   /** Slack's name, including any skin tone suffix; what reactions.add takes. */
   name: Schema.String,
@@ -127,6 +134,7 @@ export type SlackConnection = typeof SlackConnection.Type;
 
 export const SlackSync = Schema.Struct({
   channelCount: Schema.Number,
+  availableChannelCount: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   /** Channels read at least once since connecting. */
   syncedChannelCount: Schema.Number,
   lastSyncedAt: Schema.optional(Schema.String),
@@ -157,6 +165,10 @@ export const SlackState = Schema.Struct({
    * agrees; the client hides them from the new list and offers them back under a toggle.
    */
   dismissed: Schema.Array(SlackThreadRef).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** Exclusions apply to the new-thread feed, while followed threads remain available. */
+  excludedChannelIds: Schema.Array(Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
 });
 export type SlackState = typeof SlackState.Type;
 
@@ -208,6 +220,12 @@ export const SlackSetDismissedInput = Schema.Struct({
   dismissed: Schema.Boolean,
 });
 export type SlackSetDismissedInput = typeof SlackSetDismissedInput.Type;
+
+export const SlackSetChannelExcludedInput = Schema.Struct({
+  channelId: Schema.String,
+  excluded: Schema.Boolean,
+});
+export type SlackSetChannelExcludedInput = typeof SlackSetChannelExcludedInput.Type;
 
 export class SlackError extends Schema.TaggedError<SlackError>()("SlackError", {
   operation: Schema.String,

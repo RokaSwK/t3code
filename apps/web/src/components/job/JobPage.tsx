@@ -21,6 +21,7 @@ import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadc
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { SlackConnectPanel } from "./SlackConnectPanel";
+import { ChannelExclusionsDialog } from "./ChannelExclusionsDialog";
 import { SlackThreadItem } from "./SlackThreadItem";
 import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 
@@ -28,7 +29,9 @@ function syncLabel(sync: SlackState["sync"]): string {
   if (sync.rateLimitedUntil) {
     return `Slack asked us to slow down; resuming ${new Date(sync.rateLimitedUntil).toLocaleTimeString()}`;
   }
-  if (sync.channelCount === 0) return "Finding your channels…";
+  if (sync.channelCount === 0) {
+    return sync.availableChannelCount > 0 ? "All channels excluded" : "Finding your channels…";
+  }
   if (sync.syncedChannelCount < sync.channelCount) {
     return `Reading channels ${sync.syncedChannelCount} of ${sync.channelCount}…`;
   }
@@ -153,9 +156,11 @@ function FollowedThreadActions({
 function JobFeed({
   environmentId,
   state,
+  onManageChannels,
 }: {
   readonly environmentId: EnvironmentId;
   readonly state: SlackState;
+  readonly onManageChannels: () => void;
 }) {
   const settling = state.sync.syncedChannelCount < state.sync.channelCount;
   const setDismissed = useAtomCommand(slackEnvironment.setDismissed, { reportFailure: false });
@@ -218,7 +223,15 @@ function JobFeed({
         </div>
       )}
       <div className="flex flex-col gap-1 pt-2">
-        <h2 className="text-sm font-medium">New threads</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">New threads</h2>
+          <Button size="xs" variant="ghost" onClick={onManageChannels}>
+            Channels
+            {state.excludedChannelIds.length > 0
+              ? ` (${state.excludedChannelIds.length} excluded)`
+              : ""}
+          </Button>
+        </div>
         <p className="text-xs text-muted-foreground">
           {syncLabel(state.sync)}
           {state.sync.error ? ` · ${state.sync.error}` : ""}
@@ -226,11 +239,13 @@ function JobFeed({
       </div>
       {fresh.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          {settling || state.sync.channelCount === 0
-            ? "Threads show up here as channels are read."
-            : hidden.length > 0
-              ? "All new threads are dismissed."
-              : "No new threads in your channels in the last day."}
+          {state.sync.availableChannelCount > 0 && state.sync.channelCount === 0
+            ? "All channels are excluded. Use Channels to include one."
+            : settling || state.sync.channelCount === 0
+              ? "Threads show up here as channels are read."
+              : hidden.length > 0
+                ? "All new threads are dismissed."
+                : "No new threads in your channels in the last day."}
         </p>
       ) : (
         <div className="flex flex-col gap-3">
@@ -295,6 +310,7 @@ export function JobPage() {
   useEscapeToGoBack();
   const environmentId = usePrimaryEnvironmentId();
   const state = useSlackState(environmentId);
+  const [managingChannels, setManagingChannels] = useState(false);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -316,13 +332,25 @@ export function JobPage() {
             ) : state === null ? (
               <Skeleton className="h-40 w-full" />
             ) : state.connection.status === "connected" ? (
-              <JobFeed environmentId={environmentId} state={state} />
+              <JobFeed
+                environmentId={environmentId}
+                state={state}
+                onManageChannels={() => setManagingChannels(true)}
+              />
             ) : (
               <SlackConnectPanel environmentId={environmentId} connection={state.connection} />
             )}
           </WorkspacePageContainer>
         </ScrollArea>
       </div>
+      {environmentId && state?.connection.status === "connected" ? (
+        <ChannelExclusionsDialog
+          environmentId={environmentId}
+          state={state}
+          open={managingChannels}
+          onOpenChange={setManagingChannels}
+        />
+      ) : null}
     </SidebarInset>
   );
 }
