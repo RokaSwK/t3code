@@ -1,3 +1,4 @@
+import { forkDesktopChannel } from "@t3tools/shared/desktopReleaseChannels";
 import type {
   DesktopAppBranding,
   DesktopAppStageLabel,
@@ -119,7 +120,10 @@ export function resolveDesktopAppBranding(input: {
   return {
     baseName: APP_BASE_NAME,
     stageLabel,
-    displayName: `${APP_BASE_NAME} (${stageLabel})`,
+    displayName:
+      forkDesktopChannel(input.appVersion) !== null
+        ? APP_BASE_NAME
+        : `${APP_BASE_NAME} (${stageLabel})`,
   };
 }
 
@@ -161,6 +165,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
   const homeDirectory = input.homeDirectory;
   const devServerUrl = config.devServerUrl;
   const isDevelopment = Option.isSome(devServerUrl);
+  const forkChannel = isDevelopment ? null : forkDesktopChannel(input.appVersion);
   const personal = !isDevelopment && isPersonalDesktopVersion(input.appVersion);
   const appDataDirectory =
     input.platform === "win32"
@@ -175,6 +180,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
     personal,
+    forkChannel,
   });
   const rootDir = path.resolve(input.dirname, "../../..");
   const appRoot = input.isPackaged ? input.appPath : rootDir;
@@ -193,12 +199,22 @@ const make = Effect.fn("desktop.environment.make")(function* (
     joinPath: path.join,
     t3Home: config.t3Home,
   });
-  const userDataDirName = isDevelopment ? "t3code-dev" : personal ? "t3code-personal" : "t3code";
+  const userDataDirName = isDevelopment
+    ? "t3code-dev"
+    : forkChannel === "latest"
+      ? "t3code-fork-stable"
+      : forkChannel === "nightly"
+        ? "t3code-fork-nightly"
+        : personal
+          ? "t3code-personal"
+          : "t3code";
   const legacyUserDataDirName = isDevelopment
     ? "T3 Code (Dev)"
-    : personal
-      ? "T3 Code (Personal)"
-      : "T3 Code (Alpha)";
+    : forkChannel !== null
+      ? userDataDirName
+      : personal
+        ? "T3 Code (Personal)"
+        : "T3 Code (Alpha)";
   const linuxApplicationsDir = path.join(
     Option.getOrElse(config.xdgDataHome, () => path.join(homeDirectory, ".local", "share")),
     "applications",
@@ -251,7 +267,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     appUserModelId: Option.getOrElse(config.appUserModelIdOverride, () =>
       isDevelopment
         ? "com.t3tools.t3code.dev"
-        : personal
+        : personal || forkChannel !== null
           ? "com.t3tools.t3code.personal"
           : "com.t3tools.t3code",
     ),

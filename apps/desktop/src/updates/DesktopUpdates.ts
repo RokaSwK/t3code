@@ -1,3 +1,4 @@
+import { forkDesktopChannel, forkDesktopFeedUrl } from "@t3tools/shared/desktopReleaseChannels";
 import {
   DESKTOP_UPDATE_RESTART_MARKER_FILE,
   DesktopUpdateChannelSchema,
@@ -391,7 +392,15 @@ export const make = Effect.gen(function* () {
     channel: DesktopUpdateChannel,
   ) {
     yield* Effect.annotateCurrentSpan({ channel });
-    const allowsPrerelease = channel === "nightly";
+    const forkBuild = forkDesktopChannel(environment.appVersion) !== null;
+    if (forkBuild && !config.mockUpdates) {
+      yield* electronUpdater.setFeedURL({
+        provider: "generic",
+        url: forkDesktopFeedUrl(channel),
+        channel,
+      });
+    }
+    const allowsPrerelease = forkBuild || channel !== "latest";
     yield* electronUpdater.setChannel(channel);
     yield* electronUpdater.setAllowPrerelease(allowsPrerelease);
     yield* electronUpdater.setAllowDowngrade(allowsPrerelease);
@@ -741,7 +750,11 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(
         Effect.fn("desktop.updates.applyUpdateAvailable")(function* (info) {
           const state = yield* Ref.get(updateStateRef);
-          if (resolveDefaultDesktopUpdateChannel(info.version) !== state.channel) {
+          if (
+            resolveDefaultDesktopUpdateChannel(info.version) !== state.channel ||
+            (forkDesktopChannel(environment.appVersion) !== null &&
+              forkDesktopChannel(info.version) !== state.channel)
+          ) {
             yield* logUpdaterInfo("ignoring update that does not match selected channel", {
               version: info.version,
               channel: state.channel,

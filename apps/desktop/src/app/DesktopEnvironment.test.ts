@@ -40,6 +40,25 @@ const makeEnvironment = (
   DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(makeEnvironmentLayer(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect("fork tracks share one app identity but isolate their state", () =>
+    Effect.gen(function* () {
+      for (const [track, home, stage] of [
+        ["stable", ".t3-fork-stable", "Alpha"],
+        ["nightly", ".t3-fork-nightly", "Nightly"],
+        ["personal", ".t3-personal", "Personal"],
+      ] as const) {
+        const environment = yield* makeEnvironment({
+          appVersion: `0.0.43-fork.${track}.20260926`,
+          isPackaged: true,
+        });
+        assert.strictEqual(environment.baseDir, `/Users/alice/${home}`);
+        assert.strictEqual(environment.displayName, "T3 Code");
+        assert.strictEqual(environment.branding.stageLabel, stage);
+        assert.strictEqual(environment.appUserModelId, "com.t3tools.t3code.personal");
+      }
+    }),
+  );
+
   it.effect("keeps a personal build's identity and data apart from the official app", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({

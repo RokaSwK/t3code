@@ -1,3 +1,7 @@
+import {
+  forkDesktopChannel,
+  FORK_DESKTOP_REPOSITORY,
+} from "@t3tools/shared/desktopReleaseChannels";
 import { SettingsGroup } from "./SettingsGroup";
 import { Spinner } from "~/components/ui/spinner";
 import { NotificationSettings } from "./NotificationSettings";
@@ -283,6 +287,7 @@ function AboutVersionSection() {
 
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
+  const forkBuild = forkDesktopChannel(updateState?.currentVersion ?? APP_VERSION) !== null;
   const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
 
   const handleUpdateChannelChange = useCallback(
@@ -444,37 +449,71 @@ function AboutVersionSection() {
         }
       />
       {hasDesktopBridge ? (
-        <SettingsRow
-          title="Update track"
-          description="Use stable releases or nightly builds. Switch back anytime."
-          control={
-            <Select
-              value={selectedUpdateChannel}
-              onValueChange={(value) => {
-                handleUpdateChannelChange(value as DesktopUpdateChannel);
-              }}
-            >
-              <SelectTrigger
-                size="sm"
-                className="w-full sm:w-40"
-                aria-label="Update track"
-                disabled={isChangingUpdateChannel}
+        <>
+          <SettingsRow
+            title="Update track"
+            description={
+              forkBuild
+                ? "Choose Stable, Nightly, or Personal. Each track keeps its own data. Install and restart to switch."
+                : "Use stable releases or nightly builds. Switch back anytime."
+            }
+            control={
+              <Select
+                value={selectedUpdateChannel}
+                onValueChange={(value) => {
+                  handleUpdateChannelChange(value as DesktopUpdateChannel);
+                }}
               >
-                <SelectValue>
-                  {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="latest">
-                  Stable
-                </SelectItem>
-                <SelectItem hideIndicator value="nightly">
-                  Nightly
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
+                <SelectTrigger
+                  size="sm"
+                  className="w-full sm:w-40"
+                  aria-label="Update track"
+                  disabled={isChangingUpdateChannel}
+                >
+                  <SelectValue>
+                    {selectedUpdateChannel === "personal"
+                      ? "Personal"
+                      : selectedUpdateChannel === "nightly"
+                        ? "Nightly"
+                        : "Stable"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="latest">
+                    Stable
+                  </SelectItem>
+                  <SelectItem hideIndicator value="nightly">
+                    Nightly
+                  </SelectItem>
+                  {forkBuild ? (
+                    <SelectItem hideIndicator value="personal">
+                      Personal
+                    </SelectItem>
+                  ) : null}
+                </SelectPopup>
+              </Select>
+            }
+          />
+          {forkBuild && updateState?.enabled === false ? (
+            <SettingsRow
+              title="Download release"
+              description="Automatic installation will be available once signed releases are configured. Download a track and replace this app manually for now."
+              control={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    void readLocalApi()?.shell.openExternal(
+                      `https://github.com/${FORK_DESKTOP_REPOSITORY}/releases/tag/desktop-${selectedUpdateChannel === "latest" ? "stable" : selectedUpdateChannel}`,
+                    )
+                  }
+                >
+                  Open release
+                </Button>
+              }
+            />
+          ) : null}
+        </>
       ) : selectedHostedAppChannel ? (
         <SettingsRow
           title="Update track"

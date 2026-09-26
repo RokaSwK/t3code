@@ -1,3 +1,4 @@
+import { forkDesktopChannel } from "../../packages/shared/src/desktopReleaseChannels.ts";
 export const BRAND_ASSET_PATHS = {
   developmentIconComposerProject: "assets/dev/app-icon.icon",
   developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",
@@ -46,6 +47,8 @@ export function resolveWebAssetBrandForChannel(channel: WebAssetChannel): WebAss
 }
 
 export function resolveWebAssetBrandForPackageVersion(version: string): WebAssetBrand {
+  const forkChannel = forkDesktopChannel(version);
+  if (forkChannel) return forkChannel === "latest" ? "production" : forkChannel;
   if (/^[^-+]+-personal\.\d+$/.test(version)) return "personal";
   return /^[^-+]+-(?:nightly|preview)\./.test(version) ? "nightly" : "production";
 }

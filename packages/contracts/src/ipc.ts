@@ -89,7 +89,7 @@ export type DesktopUpdateStatus =
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
-export type DesktopUpdateChannel = "latest" | "nightly";
+export type DesktopUpdateChannel = "latest" | "nightly" | "personal";
 export type DesktopAppStageLabel = "Alpha" | "Dev" | "Nightly" | "Personal";
 
 export const DesktopUpdateStatusSchema = Schema.Literals([
@@ -104,7 +104,7 @@ export const DesktopUpdateStatusSchema = Schema.Literals([
 ]);
 export const DesktopRuntimeArchSchema = Schema.Literals(["arm64", "x64", "other"]);
 export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
-export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
+export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly", "personal"]);
 export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Dev", "Nightly", "Personal"]);
 
 export interface DesktopAppBranding {

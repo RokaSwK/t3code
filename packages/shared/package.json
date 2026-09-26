@@ -346,6 +346,10 @@
     "./gitPatchPath": {
       "types": "./src/gitPatchPath.ts",
       "import": "./src/gitPatchPath.ts"
+    },
+    "./desktopReleaseChannels": {
+      "types": "./src/desktopReleaseChannels.ts",
+      "import": "./src/desktopReleaseChannels.ts"
     }
   },
   "scripts": {
