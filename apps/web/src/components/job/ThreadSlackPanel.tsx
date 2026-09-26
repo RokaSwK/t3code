@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 
 import { readLocalApi } from "~/localApi";
 import { useThreadShell } from "~/state/entities";
+import { useEnvironment } from "~/state/environments";
 import { slackEnvironment } from "~/state/slack";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -17,6 +18,7 @@ import { Input } from "../ui/input";
 import { SlackMessageBody } from "./SlackThreadItem";
 
 function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url: string }) {
+  const connected = useEnvironment(threadRef.environmentId)?.connection.phase === "connected";
   const getThread = useAtomCommand(slackEnvironment.getThread, { reportFailure: false });
   const setReaction = useAtomCommand(slackEnvironment.setReaction, { reportFailure: false });
   const [detail, setDetail] = useState<SlackThreadDetail | null>(null);
@@ -24,6 +26,7 @@ function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
+    if (!connected) return;
     let cancelled = false;
     void getThread({ environmentId: threadRef.environmentId, input: { url } }).then((result) => {
       if (cancelled) return;
@@ -41,7 +44,7 @@ function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url
     };
     // Refresh explicitly reruns this request without polling the Slack API.
     // oxlint-disable-next-line react/exhaustive-effect-dependencies
-  }, [getThread, threadRef.environmentId, url, revision]);
+  }, [getThread, threadRef.environmentId, url, revision, connected]);
   const refresh = () => {
     setLoading(true);
     setRevision((value) => value + 1);
@@ -56,7 +59,7 @@ function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url
           variant="ghost"
           size="icon-sm"
           aria-label="Refresh Slack thread"
-          disabled={loading}
+          disabled={loading || !connected}
           onClick={refresh}
         >
           <RefreshCwIcon className="size-4" />
@@ -70,7 +73,12 @@ function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url
           <ExternalLinkIcon className="size-4" />
         </Button>
       </div>
-      {loading && !detail ? (
+      {!connected ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          Waiting for the environment connection…
+        </p>
+      ) : null}
+      {connected && loading && !detail ? (
         <p className="text-sm text-muted-foreground" role="status">
           Loading Slack thread…
         </p>
