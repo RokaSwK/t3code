@@ -166,6 +166,55 @@ const waitForState = (predicate: (state: SlackState) => boolean) =>
   });
 
 describe("SlackService", () => {
+  it.live("persists dismissed threads and restores them across service restarts", () => {
+    const calls: Array<SlackCall> = [];
+    const rateLimited = new Set<string>();
+    const secrets = new Map<string, Uint8Array>([
+      [
+        "slack-connection",
+        new TextEncoder().encode(
+          JSON.stringify({
+            clientId: "123.456",
+            accessToken: "xoxp-test",
+            teamName: "Acme",
+            teamUrl: "https://acme.slack.com/",
+            userId: "U1",
+            userName: "ada",
+          }),
+        ),
+      ],
+    ]);
+    const layer = SlackService.layer.pipe(
+      Layer.provide(fakeSlack(calls, rateLimited)),
+      Layer.provide(memorySecrets(secrets)),
+      Layer.provide(NodeServices.layer),
+    );
+    return Effect.gen(function* () {
+      const thread = yield* Effect.gen(function* () {
+        const slack = yield* SlackService.SlackService;
+        const synced = yield* waitForState((state) => state.threads.length === 1);
+        const thread = synced.threads[0]!;
+        yield* slack.setDismissed({ channelId: thread.channelId, ts: thread.ts, dismissed: true });
+        const dismissed = yield* waitForState((state) => state.dismissed.length === 1);
+        assert.deepStrictEqual(dismissed.dismissed, [
+          { channelId: thread.channelId, ts: thread.ts },
+        ]);
+        return thread;
+      }).pipe(Effect.provide(layer));
+
+      yield* Effect.gen(function* () {
+        const slack = yield* SlackService.SlackService;
+        const restored = yield* waitForState((state) => state.dismissed.length === 1);
+        assert.deepStrictEqual(restored.dismissed, [
+          { channelId: thread.channelId, ts: thread.ts },
+        ]);
+        yield* slack.setDismissed({ channelId: thread.channelId, ts: thread.ts, dismissed: false });
+        const visible = yield* waitForState((state) => state.dismissed.length === 0);
+        assert.deepStrictEqual(visible.dismissed, []);
+      }).pipe(Effect.provide(layer));
+    });
+  });
+
   it.live("signs in with PKCE, follows new threads, and reacts", () => {
     const calls: Array<SlackCall> = [];
     const rateLimited = new Set<string>();
@@ -268,10 +317,17 @@ describe("SlackService", () => {
       yield* slack.listMembers;
       assert.strictEqual(calls.filter((call) => call.method === "users.list").length, memberCalls);
 
-      // Unfollowing drops the thread from the list at once.
-      yield* slack.setReaction({ channelId: "C1", ts: thread!.ts, name: "eyes", reacted: false });
+      // The follow mark is on a reply; unfollow removes that mark and drops its parent.
+      yield* slack.unfollow({ channelId: "C1", ts: thread!.ts });
       const unfollowed = yield* waitForState((value) => value.followed.length === 1);
       assert.strictEqual(unfollowed.followed[0]?.channelId, "D9");
+      assert.isTrue(
+        calls.some(
+          (call) =>
+            call.method === "reactions.remove" &&
+            call.params.get("timestamp") === thread!.latestReplyTs,
+        ),
+      );
 
       // Slack's 429 fails the click, and the next one waits out Retry-After.
       rateLimited.add("reactions.add");

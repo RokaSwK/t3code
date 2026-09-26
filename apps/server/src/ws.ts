@@ -3610,6 +3610,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.slackSetReaction, slackService.setReaction(input), {
             "rpc.aggregate": "slack",
           }),
+        [WS_METHODS.slackUnfollow]: (input) =>
+          observeRpcEffect(WS_METHODS.slackUnfollow, slackService.unfollow(input), {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.slackSetDismissed]: (input) =>
+          observeRpcEffect(WS_METHODS.slackSetDismissed, slackService.setDismissed(input), {
+            "rpc.aggregate": "slack",
+          }),
         [WS_METHODS.slackListMembers]: (_input) =>
           observeRpcEffect(WS_METHODS.slackListMembers, slackService.listMembers, {
             "rpc.aggregate": "slack",

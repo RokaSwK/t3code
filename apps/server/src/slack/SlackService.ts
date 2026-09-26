@@ -35,9 +35,10 @@ import {
   type SlackMessage,
   type SlackReaction,
   type SlackSetReactionInput,
+  type SlackSetDismissedInput,
   type SlackState,
   SlackThread,
-  type SlackThreadRef,
+  SlackThreadRef,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -52,6 +53,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -82,6 +84,7 @@ import { SlackRateLimiter, type SlackCallPriority } from "./slackRateLimiter.ts"
 const CONNECTION_SECRET = "slack-connection";
 /** The app last signed in with, kept across sign-outs so reconnecting is one click. */
 const CLIENT_ID_SECRET = "slack-client-id";
+const DISMISSED_SECRET = "slack-dismissed-threads";
 const AUTHORIZATION_TIMEOUT = Duration.minutes(10);
 /** Snapshots go out at most this often while channels sync. */
 const PUBLISH_INTERVAL_MS = 2_000;
@@ -113,6 +116,13 @@ const StoredConnection = Schema.Struct({
 type StoredConnection = typeof StoredConnection.Type;
 const decodeStoredConnection = Schema.decodeUnknownOption(Schema.fromJsonString(StoredConnection));
 const encodeStoredConnection = Schema.encodeSync(Schema.fromJsonString(StoredConnection));
+const StoredDismissed = Schema.Struct({
+  teamUrl: Schema.String,
+  userId: Schema.String,
+  threads: Schema.Array(SlackThreadRef),
+});
+const decodeStoredDismissed = Schema.decodeUnknownOption(Schema.fromJsonString(StoredDismissed));
+const encodeStoredDismissed = Schema.encodeSync(Schema.fromJsonString(StoredDismissed));
 
 /** Every Slack Web API response; method-specific fields are read where used. */
 interface SlackResponse {
@@ -181,6 +191,8 @@ export class SlackService extends Context.Service<
       ref: SlackThreadRef,
     ) => Effect.Effect<ReadonlyArray<SlackMessage>, SlackError>;
     readonly setReaction: (input: SlackSetReactionInput) => Effect.Effect<void, SlackError>;
+    readonly unfollow: (ref: SlackThreadRef) => Effect.Effect<void, SlackError>;
+    readonly setDismissed: (input: SlackSetDismissedInput) => Effect.Effect<void, SlackError>;
     /** Workspace members, cached; who a T3 thread can be assigned to. */
     readonly listMembers: Effect.Effect<ReadonlyArray<SlackMember>, SlackError>;
   }
@@ -248,6 +260,8 @@ const make = Effect.gen(function* () {
   let publishedAt = 0;
   /** Threads marked with the follow reaction, newest first. */
   let followed: ReadonlyArray<SlackThread> = [];
+  let dismissed: ReadonlyArray<SlackThreadRef> = [];
+  const dismissedWrites = yield* Semaphore.make(1);
   let followedRefreshedAt = 0;
   /** Conversations followed threads live in that are not in the polled channel set. */
   const followedChannels = new Map<
@@ -293,6 +307,7 @@ const make = Effect.gen(function* () {
         ? slackFeedOrder(channelStates.flatMap((channel) => channel.threads))
         : [],
       followed: connection ? followed : [],
+      dismissed: connection ? dismissed : [],
     };
   };
 
@@ -303,6 +318,21 @@ const make = Effect.gen(function* () {
     dirty = false;
     publishedAt = yield* Clock.currentTimeMillis;
     yield* SubscriptionRef.set(stateRef, snapshot(publishedAt));
+  });
+
+  const loadDismissed = Effect.gen(function* () {
+    const cutoff = (yield* Clock.currentTimeMillis) - SLACK_FEED_WINDOW_MS;
+    const stored = yield* secrets.get(DISMISSED_SECRET).pipe(
+      Effect.map(Option.flatMap((bytes) => decodeStoredDismissed(new TextDecoder().decode(bytes)))),
+      Effect.orElseSucceed(() => Option.none<typeof StoredDismissed.Type>()),
+    );
+    dismissed =
+      connection &&
+      Option.isSome(stored) &&
+      stored.value.teamUrl === connection.teamUrl &&
+      stored.value.userId === connection.userId
+        ? stored.value.threads.filter((thread) => Number.parseFloat(thread.ts) * 1000 > cutoff)
+        : [];
   });
 
   // ---------------------------------------------------------------------------
@@ -731,6 +761,7 @@ const make = Effect.gen(function* () {
       yield* stopSync;
       channels.clear();
       followed = [];
+      dismissed = [];
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
       yield* publish;
@@ -787,6 +818,7 @@ const make = Effect.gen(function* () {
     };
     yield* persist(next);
     connection = next;
+    yield* loadDismissed;
     connectionError = undefined;
     lastClientId = next.clientId;
     if (authorization === pending) yield* endAuthorization(true);
@@ -1056,6 +1088,107 @@ const make = Effect.gen(function* () {
     yield* publish;
   });
 
+  const setDismissed = Effect.fn("slack.set_dismissed")(function* (input: SlackSetDismissedInput) {
+    yield* dismissedWrites.withPermit(
+      Effect.gen(function* () {
+        const current = connection;
+        if (!current) return yield* slackError("set_dismissed", "Slack is not connected.");
+        const present = dismissed.some(
+          (thread) => thread.channelId === input.channelId && thread.ts === input.ts,
+        );
+        if (present === input.dismissed) return;
+        const cutoff = (yield* Clock.currentTimeMillis) - SLACK_FEED_WINDOW_MS;
+        const recent = dismissed.filter((thread) => Number.parseFloat(thread.ts) * 1000 > cutoff);
+        const next = input.dismissed
+          ? [...recent, { channelId: input.channelId, ts: input.ts }]
+          : recent.filter(
+              (thread) => !(thread.channelId === input.channelId && thread.ts === input.ts),
+            );
+        yield* secrets
+          .set(
+            DISMISSED_SECRET,
+            new TextEncoder().encode(
+              encodeStoredDismissed({
+                teamUrl: current.teamUrl,
+                userId: current.userId,
+                threads: next,
+              }),
+            ),
+          )
+          .pipe(
+            Effect.mapError(() => slackError("set_dismissed", "Could not save dismissed threads.")),
+          );
+        dismissed = next;
+        yield* publish;
+      }),
+    );
+  });
+
+  const unfollow = Effect.fn("slack.unfollow")(function* (ref: SlackThreadRef) {
+    const current = connection;
+    if (!current) return yield* slackError("unfollow", "Slack is not connected.");
+    const marked: string[] = [];
+    let cursor = "";
+    for (let page = 0; page < 3; page += 1) {
+      const body = yield* call(
+        "reactions.list",
+        { user: current.userId, full: "true", limit: "200", ...(cursor ? { cursor } : {}) },
+        "interactive",
+      );
+      for (const item of (body.items as SlackApiReactionItem[] | undefined) ?? []) {
+        const message = item.message;
+        if (item.type !== "message" || item.channel !== ref.channelId || !message) continue;
+        if ((message.thread_ts ?? message.ts) !== ref.ts) continue;
+        if (
+          message.reactions?.some(
+            (reaction) =>
+              reaction.name === SLACK_FOLLOW_REACTION && reaction.users?.includes(current.userId),
+          )
+        )
+          marked.push(message.ts);
+      }
+      cursor = (body.response_metadata as { next_cursor?: string } | undefined)?.next_cursor ?? "";
+      if (!cursor) break;
+    }
+    for (const ts of marked) {
+      yield* call(
+        "reactions.remove",
+        { channel: ref.channelId, timestamp: ts, name: SLACK_FOLLOW_REACTION },
+        "interactive",
+      ).pipe(
+        Effect.catchIf(
+          (error) => error.message === "no_reaction",
+          () => Effect.void,
+        ),
+      );
+    }
+    if (marked.includes(ref.ts)) {
+      const channel = channels.get(ref.channelId);
+      if (channel) {
+        channel.threads = channel.threads.map((thread) =>
+          thread.ts === ref.ts
+            ? {
+                ...thread,
+                reactions: thread.reactions
+                  .map((reaction) =>
+                    reaction.name === SLACK_FOLLOW_REACTION && reaction.reacted
+                      ? { ...reaction, reacted: false, count: reaction.count - 1 }
+                      : reaction,
+                  )
+                  .filter((reaction) => reaction.count > 0),
+              }
+            : thread,
+        );
+      }
+    }
+    followed = followed.filter(
+      (thread) => !(thread.channelId === ref.channelId && thread.ts === ref.ts),
+    );
+    followedRefreshedAt = 0;
+    yield* Deferred.succeed(wake, undefined);
+    yield* publish;
+  });
+
   const listMembers = Effect.gen(function* () {
     if (!connection) return yield* slackError("list_members", "Slack is not connected.");
     const now = yield* Clock.currentTimeMillis;
@@ -1096,6 +1229,7 @@ const make = Effect.gen(function* () {
   if (Option.isSome(storedClientId) && storedClientId.value) lastClientId = storedClientId.value;
   if (Option.isSome(stored)) {
     connection = stored.value;
+    yield* loadDismissed;
     lastClientId = stored.value.clientId;
     yield* startSync;
   }
@@ -1111,6 +1245,8 @@ const make = Effect.gen(function* () {
     getThread,
     getReplies,
     setReaction,
+    unfollow,
+    setDismissed,
     listMembers,
   });
 });

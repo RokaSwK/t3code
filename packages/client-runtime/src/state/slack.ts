@@ -49,6 +49,14 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:set-reaction",
       tag: WS_METHODS.slackSetReaction,
     }),
+    unfollow: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:unfollow",
+      tag: WS_METHODS.slackUnfollow,
+    }),
+    setDismissed: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-dismissed",
+      tag: WS_METHODS.slackSetDismissed,
+    }),
     /** Workspace members for the thread owner picker. */
     listMembers: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:list-members",

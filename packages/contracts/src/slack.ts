@@ -136,6 +136,12 @@ export const SlackSync = Schema.Struct({
 });
 export type SlackSync = typeof SlackSync.Type;
 
+export const SlackThreadRef = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+});
+export type SlackThreadRef = typeof SlackThreadRef.Type;
+
 export const SlackState = Schema.Struct({
   connection: SlackConnection,
   sync: SlackSync,
@@ -146,6 +152,11 @@ export const SlackState = Schema.Struct({
    * first. Reading the reaction back from Slack makes the mark the only state to manage.
    */
   followed: Schema.Array(SlackThread).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /**
+   * New threads the user dismissed from the Job page. Kept on the server so every device
+   * agrees; the client hides them from the new list and offers them back under a toggle.
+   */
+  dismissed: Schema.Array(SlackThreadRef).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type SlackState = typeof SlackState.Type;
 
@@ -183,12 +194,6 @@ export const SlackCompleteConnectInput = Schema.Struct({
 });
 export type SlackCompleteConnectInput = typeof SlackCompleteConnectInput.Type;
 
-export const SlackThreadRef = Schema.Struct({
-  channelId: Schema.String,
-  ts: Schema.String,
-});
-export type SlackThreadRef = typeof SlackThreadRef.Type;
-
 export const SlackSetReactionInput = Schema.Struct({
   channelId: Schema.String,
   ts: Schema.String,
@@ -196,6 +201,13 @@ export const SlackSetReactionInput = Schema.Struct({
   reacted: Schema.Boolean,
 });
 export type SlackSetReactionInput = typeof SlackSetReactionInput.Type;
+
+export const SlackSetDismissedInput = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  dismissed: Schema.Boolean,
+});
+export type SlackSetDismissedInput = typeof SlackSetDismissedInput.Type;
 
 export class SlackError extends Schema.TaggedError<SlackError>()("SlackError", {
   operation: Schema.String,

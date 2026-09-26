@@ -1,6 +1,6 @@
 import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { EllipsisIcon, MessageSquareIcon, MessageSquarePlusIcon } from "lucide-react";
+import { EllipsisIcon, MessageSquareIcon, MessageSquarePlusIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import { isElectron } from "../../env";
@@ -16,6 +16,7 @@ import { RefreshIcon } from "../ui/refresh-icon";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { Skeleton } from "../ui/skeleton";
+import { toastManager } from "../ui/toast";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
@@ -90,6 +91,8 @@ function FollowedThreadActions({
   const navigate = useNavigate();
   const shells = useThreadShells();
   const [picking, setPicking] = useState(false);
+  const [unfollowing, setUnfollowing] = useState(false);
+  const unfollow = useAtomCommand(slackEnvironment.unfollow, { reportFailure: false });
   const linked = shells.filter(
     (shell) =>
       shell.environmentId === environmentId &&
@@ -117,6 +120,25 @@ function FollowedThreadActions({
         <MessageSquarePlusIcon />
         {linked.length > 0 ? "Start another thread" : "Start thread"}
       </Button>
+      <Button
+        size="xs"
+        variant="ghost"
+        disabled={unfollowing}
+        onClick={() => {
+          setUnfollowing(true);
+          void unfollow({
+            environmentId,
+            input: { channelId: thread.channelId, ts: thread.ts },
+          }).then((result) => {
+            if (result._tag === "Failure") {
+              toastManager.add({ type: "error", title: "Could not unfollow thread" });
+            }
+            setUnfollowing(false);
+          });
+        }}
+      >
+        Unfollow
+      </Button>
       {picking ? (
         <StartThreadFromSlackDialog
           environmentId={environmentId}
@@ -136,11 +158,40 @@ function JobFeed({
   readonly state: SlackState;
 }) {
   const settling = state.sync.syncedChannelCount < state.sync.channelCount;
+  const setDismissed = useAtomCommand(slackEnvironment.setDismissed, { reportFailure: false });
+  const [showDismissed, setShowDismissed] = useState(false);
+  const [changing, setChanging] = useState<ReadonlySet<string>>(() => new Set());
   const followedKeys = new Set(state.followed.map((thread) => `${thread.channelId}:${thread.ts}`));
+  const dismissedKeys = new Set(
+    state.dismissed.map((thread) => `${thread.channelId}:${thread.ts}`),
+  );
   // A followed thread moves out of the new list, so marking one does not show it twice.
-  const fresh = state.threads.filter(
+  const newThreads = state.threads.filter(
     (thread) => !followedKeys.has(`${thread.channelId}:${thread.ts}`),
   );
+  const fresh = newThreads.filter(
+    (thread) => !dismissedKeys.has(`${thread.channelId}:${thread.ts}`),
+  );
+  const hidden = newThreads.filter((thread) =>
+    dismissedKeys.has(`${thread.channelId}:${thread.ts}`),
+  );
+  const changeDismissed = (thread: SlackThread, dismissed: boolean) => {
+    const key = `${thread.channelId}:${thread.ts}`;
+    setChanging((current) => new Set(current).add(key));
+    void setDismissed({
+      environmentId,
+      input: { channelId: thread.channelId, ts: thread.ts, dismissed },
+    }).then((result) => {
+      setChanging((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+      if (result._tag === "Failure") {
+        toastManager.add({ type: "error", title: "Could not update dismissed thread" });
+      }
+    });
+  };
   return (
     <>
       <div className="flex flex-col gap-1">
@@ -177,7 +228,9 @@ function JobFeed({
         <p className="text-sm text-muted-foreground">
           {settling || state.sync.channelCount === 0
             ? "Threads show up here as channels are read."
-            : "No new threads in your channels in the last day."}
+            : hidden.length > 0
+              ? "All new threads are dismissed."
+              : "No new threads in your channels in the last day."}
         </p>
       ) : (
         <div className="flex flex-col gap-3">
@@ -186,10 +239,53 @@ function JobFeed({
               key={`${thread.channelId}:${thread.ts}`}
               environmentId={environmentId}
               thread={thread}
+              footer={
+                <div className="ps-11">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={changing.has(`${thread.channelId}:${thread.ts}`)}
+                    onClick={() => changeDismissed(thread, true)}
+                  >
+                    <XIcon />
+                    Dismiss
+                  </Button>
+                </div>
+              }
             />
           ))}
         </div>
       )}
+      {hidden.length > 0 ? (
+        <div className="flex flex-col gap-3">
+          <div>
+            <Button size="xs" variant="ghost" onClick={() => setShowDismissed(!showDismissed)}>
+              {showDismissed ? "Hide" : "Show"} dismissed ({hidden.length})
+            </Button>
+          </div>
+          {showDismissed
+            ? hidden.map((thread) => (
+                <SlackThreadItem
+                  key={`${thread.channelId}:${thread.ts}`}
+                  environmentId={environmentId}
+                  thread={thread}
+                  footer={
+                    <div className="ps-11">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={changing.has(`${thread.channelId}:${thread.ts}`)}
+                        onClick={() => changeDismissed(thread, false)}
+                      >
+                        Restore
+                      </Button>
+                    </div>
+                  }
+                />
+              ))
+            : null}
+        </div>
+      ) : null}
     </>
   );
 }

@@ -260,6 +260,7 @@ import {
   SlackError,
   SlackMessage,
   SlackSetReactionInput,
+  SlackSetDismissedInput,
   SlackState,
   SlackThreadRef,
   SlackGetThreadInput,
@@ -382,6 +383,8 @@ export const WS_METHODS = {
   slackGetThread: "slack.getThread",
   slackGetReplies: "slack.getReplies",
   slackSetReaction: "slack.setReaction",
+  slackUnfollow: "slack.unfollow",
+  slackSetDismissed: "slack.setDismissed",
   slackListMembers: "slack.listMembers",
 
   // Server meta
@@ -1344,6 +1347,17 @@ const WsSlackSetReactionRpc = Rpc.make(WS_METHODS.slackSetReaction, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+const WsSlackUnfollowRpc = Rpc.make(WS_METHODS.slackUnfollow, {
+  payload: SlackThreadRef,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+/** Hides a new thread from the Job page, or brings it back. */
+const WsSlackSetDismissedRpc = Rpc.make(WS_METHODS.slackSetDismissed, {
+  payload: SlackSetDismissedInput,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 /** Workspace members who can be assigned as thread owners. */
 const WsSlackListMembersRpc = Rpc.make(WS_METHODS.slackListMembers, {
   payload: Schema.Struct({}),
@@ -1617,6 +1631,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackGetThreadRpc,
   WsSlackGetRepliesRpc,
   WsSlackSetReactionRpc,
+  WsSlackUnfollowRpc,
+  WsSlackSetDismissedRpc,
   WsSlackListMembersRpc,
   WsSubscribeSlackStateRpc,
   WsSubscribeServerConfigRpc,
