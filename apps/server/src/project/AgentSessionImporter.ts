@@ -100,6 +100,13 @@ function hasImportBlockingActivity(
 /** Import recent transcript text and persist the cursor needed to resume its provider session. */
 export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(function* (
   input: AgentSessionImportInput,
+  options: {
+    /** A title the agent's own app gave the session, used when its thread is created. */
+    readonly titleFor?: (
+      source: AgentSessionSource,
+      providerSessionId: string,
+    ) => string | undefined;
+  } = {},
 ) {
   const scanner = yield* AgentSessionScanner.AgentSessionScanner;
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -247,7 +254,7 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
             commandId: CommandId.make(yield* crypto.randomUUIDv4),
             threadId,
             projectId: input.projectId,
-            title: thread.title,
+            title: options.titleFor?.(thread.source, thread.providerSessionId) ?? thread.title,
             modelSelection: { instanceId: thread.providerInstanceId, model },
             runtimeMode: DEFAULT_RUNTIME_MODE,
             interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,

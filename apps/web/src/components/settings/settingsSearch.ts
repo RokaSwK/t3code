@@ -585,6 +585,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["connect sign in disconnect workspace inbox follow threads"],
   },
   {
+    id: "agent-session-auto-import",
+    title: "Import Codex and Claude sessions",
+    to: "/settings/work",
+    searchTerms: ["import threads history codex claude desktop app sessions sync"],
+  },
+  {
     id: "devin-api-key",
     title: "Devin API key",
     to: "/settings/work",

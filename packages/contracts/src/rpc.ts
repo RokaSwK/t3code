@@ -35,6 +35,8 @@ import {
   AgentSessionImportProjectChangedError,
   AgentSessionImportProjectNotFoundError,
   AgentSessionImportResult,
+  AgentSessionSyncResult,
+  AgentSessionSyncStatus,
   AgentSessionScanInput,
   AgentSessionScanResult,
   AgentSessionScanError,
@@ -310,6 +312,8 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  agentSessionsSync: "agentSessions.sync",
+  agentSessionsSyncStatus: "agentSessions.syncStatus",
   assetsCreateUrl: "assets.createUrl",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
   attachmentsDelete: "attachments.delete",
@@ -1009,6 +1013,19 @@ const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
   error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
 });
 
+/** Adds threads for Codex and Claude app sessions not yet here, creating their projects. */
+const WsAgentSessionsSyncRpc = Rpc.make(WS_METHODS.agentSessionsSync, {
+  payload: Schema.Struct({}),
+  success: AgentSessionSyncResult,
+  error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
+});
+
+const WsAgentSessionsSyncStatusRpc = Rpc.make(WS_METHODS.agentSessionsSyncStatus, {
+  payload: Schema.Struct({}),
+  success: AgentSessionSyncStatus,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   payload: AgentSessionImportInput,
   success: AgentSessionImportResult,
@@ -1610,6 +1627,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsAgentSessionsSyncRpc,
+  WsAgentSessionsSyncStatusRpc,
   WsAssetsCreateUrlRpc,
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,

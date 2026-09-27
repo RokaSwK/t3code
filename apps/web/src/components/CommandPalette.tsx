@@ -43,6 +43,7 @@ import * as Option from "effect/Option";
 import {
   ArrowLeftIcon,
   BriefcaseIcon,
+  DownloadIcon,
   ChartNoAxesColumnIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
@@ -165,6 +166,7 @@ import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { requestThreadOwner } from "./ThreadOwnerDialog";
+import { agentSessionSync, describeAgentSessionSync } from "../state/agentSessionSync";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon, ForgejoIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { ProjectFavicon } from "./ProjectFavicon";
@@ -727,6 +729,7 @@ function OpenCommandPaletteDialog(props: {
   const { environments } = useEnvironments();
   const desktopLocalBootstraps = useDesktopLocalBootstraps();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const syncAgentSessions = useAtomCommand(agentSessionSync, { reportFailure: false });
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
@@ -2072,6 +2075,24 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  if (primaryEnvironmentId !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:import-agent-sessions",
+      searchTerms: ["import", "codex", "claude", "sessions", "threads", "history", "sync"],
+      title: "Import threads from Codex and Claude",
+      icon: <DownloadIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const result = await syncAgentSessions({ environmentId: primaryEnvironmentId, input: {} });
+        toastManager.add(
+          result._tag === "Success"
+            ? { type: "success", title: describeAgentSessionSync(result.value) }
+            : { type: "error", title: "Could not import sessions" },
+        );
+      },
+    });
+  }
 
   actionItems.push({
     kind: "action",

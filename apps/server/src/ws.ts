@@ -126,6 +126,7 @@ import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as SlackService from "./slack/SlackService.ts";
+import * as AgentSessionSync from "./project/AgentSessionSync.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -630,6 +631,7 @@ const makeWsRpcLayer = (
         | WorkspacePaths.WorkspacePaths
       >();
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
+      const agentSessionSync = yield* AgentSessionSync.AgentSessionSync;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
@@ -3165,6 +3167,14 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.agentSessionsScan]: () =>
           observeRpcEffect(WS_METHODS.agentSessionsScan, agentSessionScanner.scan, {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.agentSessionsSync]: (_input) =>
+          observeRpcEffect(WS_METHODS.agentSessionsSync, agentSessionSync.syncNow, {
+            "rpc.aggregate": "workspace",
+          }),
+        [WS_METHODS.agentSessionsSyncStatus]: (_input) =>
+          observeRpcEffect(WS_METHODS.agentSessionsSyncStatus, agentSessionSync.status, {
             "rpc.aggregate": "workspace",
           }),
         [WS_METHODS.agentSessionsImport]: (input) =>

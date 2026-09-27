@@ -103,6 +103,23 @@ export const AgentSessionImportResult = Schema.Struct({
 });
 export type AgentSessionImportResult = typeof AgentSessionImportResult.Type;
 
+/** One pass of keeping this server's threads in step with the Codex and Claude apps. */
+export const AgentSessionSyncResult = Schema.Struct({
+  /** Threads that did not exist before. Existing threads are never changed. */
+  addedThreads: NonNegativeInt,
+  createdProjects: NonNegativeInt,
+  skippedThreads: NonNegativeInt,
+});
+export type AgentSessionSyncResult = typeof AgentSessionSyncResult.Type;
+
+export const AgentSessionSyncStatus = Schema.Struct({
+  running: Schema.Boolean,
+  lastRunAt: Schema.optional(IsoDateTime),
+  lastResult: Schema.optional(AgentSessionSyncResult),
+  error: Schema.optional(Schema.String),
+});
+export type AgentSessionSyncStatus = typeof AgentSessionSyncStatus.Type;
+
 export class AgentSessionScanError extends Schema.TaggedError<AgentSessionScanError>()(
   "AgentSessionScanError",
   {

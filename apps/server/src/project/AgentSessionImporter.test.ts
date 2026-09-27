@@ -288,6 +288,54 @@ it.layer(NodeServices.layer)("AgentSessionImporter", (it) => {
       }),
     );
 
+    it.effect("names a new thread after its app's title when there is one", () =>
+      Effect.gen(function* () {
+        const commands: Array<OrchestrationCommand> = [];
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () =>
+            Stream.fromIterable([
+              makeThreadOutcome(makeThread("codex")),
+              makeThreadOutcome(makeThread("claudeAgent")),
+            ]),
+        });
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: (command) => Effect.sync(() => ({ sequence: commands.push(command) })),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const directory = ProviderSessionDirectory.ProviderSessionDirectory.of({
+          upsert: () => Effect.void,
+          getProvider: () => Effect.die("unused"),
+          recordImportedTranscript: () => Effect.void,
+          getBinding: () => Effect.succeedNone,
+          listThreadIds: () => Effect.die("unused"),
+          listBindings: () => Effect.die("unused"),
+        });
+
+        yield* importRecentAgentThreads(
+          { projectId: PROJECT_ID },
+          { titleFor: (source) => (source === "codex" ? "Named in the Codex app" : undefined) },
+        ).pipe(
+          Effect.provideService(AgentSessionScanner.AgentSessionScanner, scanner),
+          Effect.provideService(OrchestrationEngine.OrchestrationEngineService, engine),
+          Effect.provideService(ProviderSessionDirectory.ProviderSessionDirectory, directory),
+          Effect.provide(makeSnapshotsLayer({ project: makeProject() })),
+        );
+
+        const titles = commands.flatMap((command) =>
+          command.type === "thread.create" ? [command.title] : [],
+        );
+        expect(titles[0]).toBe("Named in the Codex app");
+        // Without an app title the transcript's own title stays.
+        expect(titles[1]).toBe(makeThread("claudeAgent").title);
+      }),
+    );
+
     it.effect("rejects a changed project root before scanning or writing", () =>
       Effect.gen(function* () {
         const recentThreads = vi.fn(() => Stream.empty);

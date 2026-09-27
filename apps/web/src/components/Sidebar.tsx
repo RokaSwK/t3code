@@ -219,6 +219,7 @@ import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
 import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
+import { ImportedThreadBadge, importedThreadInstanceId } from "./ImportedThreadBadge";
 import {
   deriveProviderEntriesByEnvironment,
   shouldShowInstanceBadge,
@@ -1528,6 +1529,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <SlackIcon className="size-3.5" />
     </InlineButton>
   ) : null;
+  const importedInstanceId = importedThreadInstanceId(thread.id);
+  const importBadge =
+    importedInstanceId !== null ? (
+      <ImportedThreadBadge
+        threadId={thread.id}
+        driver={importedInstanceId === modelInstanceId ? driverKind : null}
+      />
+    ) : null;
   const ownerBadge = thread.owner ? (
     <span
       role="img"
@@ -1652,6 +1661,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               the time/jump label yields to the settle affordance. */}
             {prBadge}
             {slackBadge}
+            {importBadge}
             {ownerBadge}
             {sortable?.isDragging ? (
               dragDestination
@@ -1962,6 +1972,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {terminalStatusIcon}
               {prBadge}
               {slackBadge}
+              {importBadge}
               {ownerBadge}
               {diff ? (
                 <span className="shrink-0 font-mono">

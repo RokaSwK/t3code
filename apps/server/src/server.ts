@@ -76,6 +76,8 @@ import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as SlackService from "./slack/SlackService.ts";
+import * as AgentSessionScannerModule from "./project/AgentSessionScanner.ts";
+import * as AgentSessionSync from "./project/AgentSessionSync.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
@@ -433,6 +435,10 @@ const DeviceLayerLive = DeviceService.layer.pipe(
 );
 
 const SlackLayerLive = SlackService.layer.pipe(Layer.provide(ServerSecretStore.layer));
+// Its own scanner: the RPC layer's is per connection, and syncing runs without clients.
+const AgentSessionSyncLive = AgentSessionSync.layer.pipe(
+  Layer.provide(AgentSessionScannerModule.layer),
+);
 
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer));
 
@@ -509,6 +515,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(AntigravityInstallationRefreshLive),
   Layer.provideMerge(ReplayMarkers.layer),
   Layer.provideMerge(ProviderAuthServiceLive),
+  Layer.provideMerge(AgentSessionSyncLive),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),
   Layer.provideMerge(CheckpointingLayerLive),

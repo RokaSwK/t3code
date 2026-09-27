@@ -110,6 +110,7 @@ import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as SlackService from "./slack/SlackService.ts";
+import * as AgentSessionSync from "./project/AgentSessionSync.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
 import {
   isThreadDetailEvent,
@@ -846,6 +847,7 @@ const buildAppUnderTest = (options?: {
             sessionsForThread: () => Effect.succeed([]),
           }),
           Layer.mock(SlackService.SlackService)({}),
+          Layer.mock(AgentSessionSync.AgentSessionSync)({}),
         ),
       ),
       Layer.provide(

@@ -9,7 +9,16 @@ import type { DevinConnection, EnvironmentId, SlackConnection } from "@t3tools/c
 import { useState } from "react";
 
 import { readLocalApi } from "~/localApi";
+import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
+import {
+  agentSessionSync,
+  agentSessionSyncStatus,
+  describeAgentSessionSync,
+} from "~/state/agentSessionSync";
+import { useServerConfigs } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
+import { useEnvironmentQuery } from "~/state/query";
+import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { slackEnvironment, useSlackState } from "~/state/slack";
 import { useAtomCommand } from "~/state/use-atom-command";
 
@@ -17,6 +26,8 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
+import { Switch } from "../ui/switch";
+import { toastManager } from "../ui/toast";
 import { SlackConnectPanel } from "./SlackConnectPanel";
 
 function SlackSettings({
@@ -161,6 +172,65 @@ function DevinSettings({
   );
 }
 
+/** Codex and Claude app sessions arriving here as threads, automatically or on request. */
+function AgentSessionImportSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const configs = useServerConfigs();
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const sync = useAtomCommand(agentSessionSync, { reportFailure: false });
+  const status = useEnvironmentQuery(agentSessionSyncStatus({ environmentId, input: {} }));
+  const [pending, setPending] = useState(false);
+  const autoImport = configs.get(environmentId)?.settings.agentSessionAutoImport !== false;
+  const last = status.data;
+  const running = pending || last?.running === true;
+  const summary = running
+    ? "Looking for new sessions…"
+    : last?.lastRunAt
+      ? `${last.error ?? describeAgentSessionSync(last.lastResult ?? { addedThreads: 0, createdProjects: 0 })} · ${formatRelativeTimeLabel(last.lastRunAt)}`
+      : "Adds a thread for each Codex and Claude app session not here yet. Existing threads are never changed.";
+  return (
+    <>
+      <SettingsRow
+        id="agent-session-auto-import"
+        title="Import new sessions automatically"
+        description="Every few minutes, including projects for repositories the apps worked in."
+        control={
+          <Switch
+            aria-label="Import new sessions automatically"
+            checked={autoImport}
+            onCheckedChange={(checked) => updateSettings({ agentSessionAutoImport: checked })}
+          />
+        }
+      />
+      <SettingsRow
+        id="agent-session-import-now"
+        title="Import now"
+        description={summary}
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={running}
+            onClick={() => {
+              setPending(true);
+              void sync({ environmentId, input: {} }).then((result) => {
+                setPending(false);
+                status.refresh();
+                toastManager.add(
+                  result._tag === "Success"
+                    ? { type: "success", title: describeAgentSessionSync(result.value) }
+                    : { type: "error", title: "Could not import sessions" },
+                );
+              });
+            }}
+          >
+            Import now
+          </Button>
+        }
+      />
+    </>
+  );
+}
+
 export function WorkSettingsPanel() {
   const environmentId = usePrimaryEnvironmentId();
   const state = useSlackState(environmentId);
@@ -175,6 +245,13 @@ export function WorkSettingsPanel() {
           <Skeleton className="m-4 h-16" />
         ) : (
           <SlackSettings environmentId={environmentId} connection={state.connection} />
+        )}
+      </SettingsSection>
+      <SettingsSection id="agent-sessions" title="Codex and Claude apps">
+        {environmentId === null ? (
+          <Skeleton className="m-4 h-16" />
+        ) : (
+          <AgentSessionImportSettings environmentId={environmentId} />
         )}
       </SettingsSection>
       <SettingsSection id="devin" title="Devin">
