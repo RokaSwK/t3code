@@ -15,6 +15,9 @@ type SlackTier = 2 | 3 | 4;
 const METHOD_TIERS: Record<string, SlackTier> = {
   "users.conversations": 2,
   "emoji.list": 2,
+  "users.list": 2,
+  "reactions.list": 2,
+  "search.messages": 2,
   "conversations.history": 3,
   "conversations.replies": 3,
   "reactions.add": 3,

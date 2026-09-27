@@ -24,6 +24,16 @@ import {
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
 
 describe("serverSettings helpers", () => {
+  it("replaces Work roots and keeps an explicit empty selection", () => {
+    expect(DEFAULT_SERVER_SETTINGS.workProjectRootIds).toBeUndefined();
+    const selected = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      workProjectRootIds: [ProjectId.make("tuyo")],
+    });
+    expect(selected.workProjectRootIds).toEqual([ProjectId.make("tuyo")]);
+    expect(
+      applyServerSettingsPatch(selected, { workProjectRootIds: [] }).workProjectRootIds,
+    ).toEqual([]);
+  });
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },

@@ -154,3 +154,56 @@ export function slackFeedOrder<T extends { readonly ts: string }>(
     .sort((left, right) => Number.parseFloat(right.ts) - Number.parseFloat(left.ts))
     .slice(0, limit);
 }
+
+/** Open PRs linked from the feed are re-read this often; merged and closed ones are final. */
+export const SLACK_PULL_REQUEST_INTERVAL_MS = 5 * 60_000;
+/** Aliases per GitHub GraphQL request. */
+export const SLACK_PULL_REQUEST_BATCH = 50;
+const PULL_REQUESTS_PER_THREAD = 5;
+
+export interface SlackPullRequestLink {
+  readonly url: string;
+  readonly repository: string;
+  readonly number: number;
+}
+
+const GITHUB_PULL_REQUEST_URL =
+  /https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)\/pull\/(\d+)/g;
+
+/** github.com pull requests a message links to, deduplicated, in order of appearance. */
+export function slackPullRequestLinks(text: string): SlackPullRequestLink[] {
+  const links = new Map<string, SlackPullRequestLink>();
+  for (const match of text.matchAll(GITHUB_PULL_REQUEST_URL)) {
+    const repository = `${match[1]}/${match[2]}`;
+    const number = Number(match[3]);
+    const url = `https://github.com/${repository}/pull/${number}`;
+    if (!links.has(url)) links.set(url, { url, repository, number });
+    if (links.size === PULL_REQUESTS_PER_THREAD) break;
+  }
+  return [...links.values()];
+}
+
+/** One GraphQL document reading every PR's state by URL; `resource` needs no repository lookup. */
+export function slackPullRequestStateQuery(urls: ReadonlyArray<string>): string {
+  const fields = urls.map(
+    (url, index) =>
+      `p${index}: resource(url: ${JSON.stringify(url)}) { ... on PullRequest { state } }`,
+  );
+  return `query { ${fields.join(" ")} }`;
+}
+
+/** The states GitHub answered for `urls`, keyed by URL. PRs it could not read are left out. */
+export function slackPullRequestStates(
+  urls: ReadonlyArray<string>,
+  response: unknown,
+): Map<string, "open" | "closed" | "merged"> {
+  const data = (response as { data?: Record<string, { state?: unknown } | null> } | null)?.data;
+  const states = new Map<string, "open" | "closed" | "merged">();
+  for (const [index, url] of urls.entries()) {
+    const state = data?.[`p${index}`]?.state;
+    if (state === "OPEN") states.set(url, "open");
+    else if (state === "CLOSED") states.set(url, "closed");
+    else if (state === "MERGED") states.set(url, "merged");
+  }
+  return states;
+}

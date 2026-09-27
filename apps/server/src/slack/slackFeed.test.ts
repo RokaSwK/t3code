@@ -7,6 +7,9 @@ import {
   slackLatestActivityMs,
   slackPermalink,
   slackPollDelayMs,
+  slackPullRequestLinks,
+  slackPullRequestStateQuery,
+  slackPullRequestStates,
 } from "./slackFeed.ts";
 
 describe("isSlackThreadRoot", () => {
@@ -88,6 +91,35 @@ describe("slackFollowedRefs", () => {
     expect(refs.map((ref) => [ref.channelId, ref.ts, ref.root !== undefined])).toEqual([
       ["C1", "3.000000", true],
       ["C2", "2.000000", false],
+    ]);
+  });
+});
+
+describe("slack pull request links", () => {
+  it("finds github.com PRs once each, from Slack or markdown links", () => {
+    const text =
+      "<https://github.com/acme/api/pull/774|acme/api#774> and [again](https://github.com/acme/api/pull/774/files), plus https://github.com/acme/mobile/pull/696 and https://github.com/acme/api/issues/3";
+    expect(slackPullRequestLinks(text)).toEqual([
+      { url: "https://github.com/acme/api/pull/774", repository: "acme/api", number: 774 },
+      { url: "https://github.com/acme/mobile/pull/696", repository: "acme/mobile", number: 696 },
+    ]);
+  });
+
+  it("reads states by alias and leaves unreadable PRs out", () => {
+    const urls = [
+      "https://github.com/a/b/pull/1",
+      "https://github.com/a/b/pull/2",
+      "https://github.com/a/b/pull/3",
+    ];
+    expect(slackPullRequestStateQuery(urls)).toContain(
+      'p2: resource(url: "https://github.com/a/b/pull/3")',
+    );
+    const states = slackPullRequestStates(urls, {
+      data: { p0: { state: "MERGED" }, p1: null, p2: { state: "OPEN" } },
+    });
+    expect([...states]).toEqual([
+      ["https://github.com/a/b/pull/1", "merged"],
+      ["https://github.com/a/b/pull/3", "open"],
     ]);
   });
 });

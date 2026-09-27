@@ -2077,7 +2077,7 @@ function OpenCommandPaletteDialog(props: {
     kind: "action",
     value: "action:job",
     searchTerms: ["work", "job", "slack", "threads", "messages", "inbox"],
-    title: "Open work",
+    title: "Open Tuyo work",
     icon: <BriefcaseIcon className={ITEM_ICON_CLASS} />,
     run: async () => {
       await navigate({ to: "/job" });

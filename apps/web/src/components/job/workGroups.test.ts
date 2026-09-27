@@ -1,13 +1,14 @@
 import {
   EnvironmentId,
   ProjectId,
+  type SlackThread,
   ThreadId,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildWorkGroups, type WorkThread } from "./workGroups";
+import { buildWorkGroups, WORK_QUIET_MS, type WorkThread } from "./workGroups";
 
 const now = "2026-09-26T20:00:00.000Z";
 
@@ -123,5 +124,123 @@ describe("buildWorkGroups", () => {
     ]);
 
     expect(groups[0]).toMatchObject({ status: "done", reason: "Work completed" });
+  });
+});
+
+const nowMs = Date.parse(now);
+const slackTs = (ms: number) => (ms / 1000).toFixed(6);
+const permalink = "https://acme.slack.com/archives/C1/p1790000000000100";
+
+function conversation(changes: Partial<SlackThread> = {}): SlackThread {
+  return {
+    channelId: "C1",
+    ts: slackTs(nowMs - 60 * 60_000),
+    authorName: "Bo",
+    markdown: "refunds double-fire",
+    fileCount: 0,
+    edited: false,
+    replyCount: 1,
+    reactions: [],
+    channelName: "app-bugs",
+    channelKind: "channel",
+    permalink,
+    startedByMe: true,
+    ...changes,
+  };
+}
+
+const devinSession = (state?: "working" | "waiting" | "finished") => ({
+  id: "abc",
+  url: "https://app.devin.ai/sessions/abc",
+  ...(state ? { state } : {}),
+});
+
+describe("buildWorkGroups with Slack conversations", () => {
+  const status = (value: SlackThread, extra: Parameters<typeof buildWorkGroups>[1] = {}) => {
+    const [group] = buildWorkGroups([], { conversations: [value], now: nowMs, ...extra });
+    return [group?.status, group?.reason];
+  };
+
+  it("leads with the conversation and attaches T3 threads linked to it", () => {
+    const groups = buildWorkGroups(
+      [thread("fix", { linkedSlackThreads: [permalink], hasPendingApprovals: true })],
+      { conversations: [conversation()], now: nowMs },
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.conversation?.channelName).toBe("app-bugs");
+    expect(groups[0]?.threads.map((item) => item.id)).toEqual(["fix"]);
+    expect(groups[0]).toMatchObject({ status: "needs", reason: "Agent needs approval" });
+  });
+
+  it("needs you when someone else replied or Devin is waiting, and waits after your reply", () => {
+    const reply = (by: "me" | "devin" | "other") => ({
+      lastReply: { by, authorName: by === "other" ? "Cy" : "x", ts: slackTs(nowMs - 30 * 60_000) },
+    });
+    expect(status(conversation(reply("other")))).toEqual(["needs", "Cy replied"]);
+    expect(status(conversation(reply("me")))).toEqual(["waiting", "Waiting for a reply"]);
+    expect(
+      status(
+        conversation({
+          ...reply("devin"),
+          devin: { sessions: [devinSession("waiting")], stopped: false, lastMessageTs: "1" },
+        }),
+      ),
+    ).toEqual(["needs", "Devin is waiting for you"]);
+    expect(
+      status(
+        conversation({
+          ...reply("devin"),
+          devin: { sessions: [devinSession("working")], stopped: false, lastMessageTs: "1" },
+        }),
+      ),
+    ).toEqual(["working", "Devin working"]);
+    expect(
+      status(
+        conversation({
+          ...reply("devin"),
+          devin: { sessions: [devinSession("finished")], stopped: false, lastMessageTs: "1" },
+        }),
+      ),
+    ).toEqual(["needs", "Devin finished"]);
+    expect(status(conversation({ startedByMe: false }))).toEqual(["needs", "No reply yet"]);
+  });
+
+  it("is done by a tick, merged PRs, or going quiet, and a new reply reopens a marked thread", () => {
+    expect(
+      status(conversation({ reactions: [{ name: "white_check_mark", count: 1, reacted: false }] })),
+    ).toEqual(["done", "Marked ✅ in Slack"]);
+    expect(
+      status(
+        conversation({
+          pullRequests: [
+            {
+              url: "https://github.com/owner/repo/pull/42",
+              repository: "owner/repo",
+              number: 42,
+              state: "merged",
+            },
+          ],
+        }),
+      ),
+    ).toEqual(["done", "PR merged"]);
+    const quietTs = slackTs(nowMs - WORK_QUIET_MS - 60_000);
+    expect(
+      status(
+        conversation({ ts: quietTs, lastReply: { by: "me", authorName: "Ada", ts: quietTs } }),
+      ),
+    ).toEqual(["done", "Quiet for 3 days"]);
+
+    const markedAt = nowMs - 2 * 60 * 60_000;
+    const dismissed = [{ channelId: "C1", ts: conversation().ts, at: markedAt }];
+    const before = { by: "other" as const, authorName: "Cy", ts: slackTs(markedAt - 60_000) };
+    const after = { ...before, ts: slackTs(markedAt + 60_000) };
+    expect(status(conversation({ lastReply: before }), { dismissed })).toEqual([
+      "done",
+      "Marked done",
+    ]);
+    expect(status(conversation({ lastReply: after }), { dismissed })).toEqual([
+      "needs",
+      "Cy replied",
+    ]);
   });
 });

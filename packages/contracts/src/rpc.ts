@@ -268,6 +268,8 @@ import {
   SlackGetThreadInput,
   SlackThreadDetail,
   SlackMember,
+  DevinConnectInput,
+  DevinConnection,
 } from "./slack.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -382,6 +384,7 @@ export const WS_METHODS = {
   slackCancelConnect: "slack.cancelConnect",
   slackDisconnect: "slack.disconnect",
   slackRefresh: "slack.refresh",
+  slackResetInbox: "slack.resetInbox",
   slackGetThread: "slack.getThread",
   slackGetReplies: "slack.getReplies",
   slackSetReaction: "slack.setReaction",
@@ -390,6 +393,8 @@ export const WS_METHODS = {
   slackGetChannels: "slack.getChannels",
   slackSetChannelExcluded: "slack.setChannelExcluded",
   slackListMembers: "slack.listMembers",
+  devinConnect: "devin.connect",
+  devinDisconnect: "devin.disconnect",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1334,6 +1339,11 @@ const WsSlackRefreshRpc = Rpc.make(WS_METHODS.slackRefresh, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+const WsSlackResetInboxRpc = Rpc.make(WS_METHODS.slackResetInbox, {
+  payload: Schema.Struct({}),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 const WsSlackGetThreadRpc = Rpc.make(WS_METHODS.slackGetThread, {
   payload: SlackGetThreadInput,
   success: SlackThreadDetail,
@@ -1377,6 +1387,18 @@ const WsSlackSetChannelExcludedRpc = Rpc.make(WS_METHODS.slackSetChannelExcluded
 const WsSlackListMembersRpc = Rpc.make(WS_METHODS.slackListMembers, {
   payload: Schema.Struct({}),
   success: Schema.Array(SlackMember),
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+/** Saves a Devin API key after checking it with Devin. */
+const WsDevinConnectRpc = Rpc.make(WS_METHODS.devinConnect, {
+  payload: DevinConnectInput,
+  success: DevinConnection,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
+const WsDevinDisconnectRpc = Rpc.make(WS_METHODS.devinDisconnect, {
+  payload: Schema.Struct({}),
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
@@ -1643,6 +1665,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackCancelConnectRpc,
   WsSlackDisconnectRpc,
   WsSlackRefreshRpc,
+  WsSlackResetInboxRpc,
   WsSlackGetThreadRpc,
   WsSlackGetRepliesRpc,
   WsSlackSetReactionRpc,
@@ -1651,6 +1674,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackGetChannelsRpc,
   WsSlackSetChannelExcludedRpc,
   WsSlackListMembersRpc,
+  WsDevinConnectRpc,
+  WsDevinDisconnectRpc,
   WsSubscribeSlackStateRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

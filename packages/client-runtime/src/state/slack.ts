@@ -37,6 +37,10 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:refresh",
       tag: WS_METHODS.slackRefresh,
     }),
+    resetInbox: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:reset-inbox",
+      tag: WS_METHODS.slackResetInbox,
+    }),
     getThread: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:get-thread",
       tag: WS_METHODS.slackGetThread,
@@ -64,6 +68,14 @@ export function createSlackEnvironmentAtoms<R, E>(
     setChannelExcluded: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:set-channel-excluded",
       tag: WS_METHODS.slackSetChannelExcluded,
+    }),
+    devinConnect: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:devin-connect",
+      tag: WS_METHODS.devinConnect,
+    }),
+    devinDisconnect: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:devin-disconnect",
+      tag: WS_METHODS.devinDisconnect,
     }),
     /** Workspace members for the thread owner picker. */
     listMembers: createEnvironmentRpcCommand(runtime, {

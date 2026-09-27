@@ -3598,6 +3598,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.slackRefresh, slackService.refresh, {
             "rpc.aggregate": "slack",
           }),
+        [WS_METHODS.slackResetInbox]: (_input) =>
+          observeRpcEffect(WS_METHODS.slackResetInbox, slackService.resetInbox, {
+            "rpc.aggregate": "slack",
+          }),
         [WS_METHODS.slackGetThread]: (input) =>
           observeRpcEffect(WS_METHODS.slackGetThread, slackService.getThread(input), {
             "rpc.aggregate": "slack",
@@ -3630,6 +3634,14 @@ const makeWsRpcLayer = (
           ),
         [WS_METHODS.slackListMembers]: (_input) =>
           observeRpcEffect(WS_METHODS.slackListMembers, slackService.listMembers, {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.devinConnect]: (input) =>
+          observeRpcEffect(WS_METHODS.devinConnect, slackService.devinConnect(input), {
+            "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.devinDisconnect]: (_input) =>
+          observeRpcEffect(WS_METHODS.devinDisconnect, slackService.devinDisconnect, {
             "rpc.aggregate": "slack",
           }),
         [WS_METHODS.subscribeSlackState]: (_input) =>

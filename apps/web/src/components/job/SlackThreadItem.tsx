@@ -1,4 +1,10 @@
-import type { EnvironmentId, SlackMessage, SlackReaction, SlackThread } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  SlackMessage,
+  SlackPullRequest,
+  SlackReaction,
+  SlackThread,
+} from "@t3tools/contracts";
 import {
   ExternalLinkIcon,
   HashIcon,
@@ -16,11 +22,14 @@ import { useAtomCommand } from "~/state/use-atom-command";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import ChatMarkdown from "../ChatMarkdown";
+import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
+import { Badge } from "../ui/badge";
 import { Button, InlineButton } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { slackThreadDoneReason } from "./slackInbox";
 
 const PILL_CLASS =
   "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
@@ -177,6 +186,38 @@ export function SlackMessageBody({
   );
 }
 
+const PULL_REQUEST_STATUS = {
+  open: { label: "Open", Icon: PullRequestGlyph.pullRequest },
+  merged: { label: "Merged", Icon: PullRequestGlyph.merged },
+  closed: { label: "Closed", Icon: PullRequestGlyph.closed },
+} as const;
+
+/** The PRs a thread links to, with the state GitHub last reported. */
+function SlackPullRequests({ requests }: { readonly requests: ReadonlyArray<SlackPullRequest> }) {
+  return (
+    <div className="flex min-w-0 flex-wrap gap-2 ps-11">
+      {requests.map((request) => {
+        const status = request.state ? PULL_REQUEST_STATUS[request.state] : null;
+        const Icon = status?.Icon ?? PullRequestGlyph.pullRequest;
+        return (
+          <InlineButton
+            key={request.url}
+            tone="muted"
+            className="max-w-full"
+            onClick={() => openExternal(request.url)}
+          >
+            <Icon />
+            <span className="truncate">
+              {request.repository}#{request.number}
+            </span>
+            {status ? <span>· {status.label}</span> : null}
+          </InlineButton>
+        );
+      })}
+    </div>
+  );
+}
+
 type RepliesState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly messages: ReadonlyArray<SlackMessage> }
@@ -198,10 +239,13 @@ function ChannelGlyph({ kind }: { readonly kind: SlackThread["channelKind"] }) {
 export const SlackThreadItem = memo(function SlackThreadItem({
   environmentId,
   thread,
+  badge,
   footer,
 }: {
   readonly environmentId: EnvironmentId;
   readonly thread: SlackThread;
+  /** Replaces the done badge, for pages that say more about where the thread stands. */
+  readonly badge?: ReactNode;
   /** Actions that belong to this thread on the page it is shown on. */
   readonly footer?: ReactNode;
 }) {
@@ -256,6 +300,8 @@ export const SlackThreadItem = memo(function SlackThreadItem({
     [environmentId, setReaction, thread.channelId],
   );
 
+  const doneReason = slackThreadDoneReason(thread);
+
   return (
     <article className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground">
       <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
@@ -263,6 +309,13 @@ export const SlackThreadItem = memo(function SlackThreadItem({
           <ChannelGlyph kind={thread.channelKind} />
           <span className="truncate">{thread.channelName}</span>
         </span>
+        {badge !== undefined ? (
+          badge
+        ) : doneReason ? (
+          <Badge variant="success" size="sm">
+            {doneReason}
+          </Badge>
+        ) : null}
         <InlineButton
           tone="muted"
           className="ms-auto shrink-0"
@@ -276,6 +329,7 @@ export const SlackThreadItem = memo(function SlackThreadItem({
         message={thread}
         onToggleReaction={(name, reacted) => void toggleReaction(thread.ts, name, reacted, false)}
       />
+      {thread.pullRequests ? <SlackPullRequests requests={thread.pullRequests} /> : null}
       {thread.replyCount > 0 ? (
         <div className="flex flex-col gap-3 ps-11">
           <InlineButton

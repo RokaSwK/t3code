@@ -7,8 +7,12 @@ import {
 import {
   parseSlackThreadUrl,
   type ScopedThreadRef,
+  type SlackDismissedThread,
+  type SlackThread,
   type ThreadPullRequestSnapshot,
 } from "@t3tools/contracts";
+
+import { slackThreadDoneReason } from "./slackInbox";
 
 export type WorkThread = Pick<
   EnvironmentThreadShell,
@@ -43,13 +47,22 @@ export interface WorkPullRequest {
 
 export interface WorkGroup {
   readonly id: string;
+  /** The Slack conversation this work is about, when it is one of yours. */
+  readonly conversation: SlackThread | null;
   readonly threads: ReadonlyArray<WorkThread>;
   readonly pullRequests: ReadonlyArray<WorkPullRequest>;
   readonly slackLinks: ReadonlyArray<string>;
   readonly status: WorkStatus;
   readonly reason: string;
   readonly updatedAt: string;
+  /** Marked done here, and not reopened by a later reply from someone else. */
+  readonly markedDone: boolean;
 }
+
+/** A conversation where only you or Devin spoke last goes quiet into Done after this. */
+export const WORK_QUIET_MS = 3 * 24 * 60 * 60_000;
+/** Without Devin's API, Devin counts as working this long after its last message. */
+const DEVIN_RECENT_MS = 15 * 60_000;
 
 function pullRequestsOf(thread: WorkThread): WorkPullRequest[] {
   const links = visibleThreadPullRequests(thread.pullRequests);
@@ -76,10 +89,10 @@ function pullRequestsOf(thread: WorkThread): WorkPullRequest[] {
   }));
 }
 
-function statusOf(
-  threads: ReadonlyArray<WorkThread>,
-  pullRequests: ReadonlyArray<WorkPullRequest>,
-): Pick<WorkGroup, "status" | "reason"> {
+type Attention = Pick<WorkGroup, "status" | "reason">;
+
+/** An agent in a T3 thread is waiting on you. */
+function agentNeeds(threads: ReadonlyArray<WorkThread>): Attention | null {
   if (threads.some((thread) => thread.hasPendingApprovals)) {
     return { status: "needs", reason: "Agent needs approval" };
   }
@@ -92,7 +105,15 @@ function statusOf(
   if (threads.some((thread) => thread.latestTurn?.state === "error")) {
     return { status: "needs", reason: "Agent stopped with an error" };
   }
-  const open = pullRequests.filter((request) => request.snapshot?.state === "open");
+  return null;
+}
+
+function openPullRequests(pullRequests: ReadonlyArray<WorkPullRequest>) {
+  return pullRequests.filter((request) => request.snapshot?.state === "open");
+}
+
+function pullRequestNeeds(pullRequests: ReadonlyArray<WorkPullRequest>): Attention | null {
+  const open = openPullRequests(pullRequests);
   if (open.some((request) => request.snapshot?.mergeability === "conflicting")) {
     return { status: "needs", reason: "PR has a merge conflict" };
   }
@@ -102,41 +123,174 @@ function statusOf(
   if (open.some((request) => request.snapshot?.reviewDecision === "changes-requested")) {
     return { status: "needs", reason: "Changes requested on PR" };
   }
-  if (
-    threads.some(
-      (thread) => thread.latestTurn?.state === "running" || thread.backgroundLiveness === "working",
-    )
-  ) {
-    return { status: "working", reason: "Agent working" };
-  }
+  return null;
+}
+
+function agentWorking(threads: ReadonlyArray<WorkThread>): boolean {
+  return threads.some(
+    (thread) => thread.latestTurn?.state === "running" || thread.backgroundLiveness === "working",
+  );
+}
+
+function pullRequestWaiting(pullRequests: ReadonlyArray<WorkPullRequest>): Attention | null {
   if (pullRequests.some((request) => request.snapshot === null)) {
     return { status: "waiting", reason: "Waiting for PR status" };
   }
+  const open = openPullRequests(pullRequests);
   if (open.some((request) => request.snapshot?.checksState === "pending")) {
     return { status: "waiting", reason: "PR checks running" };
   }
   if (open.some((request) => request.snapshot?.reviewDecision === "review-required")) {
     return { status: "waiting", reason: "PR review required" };
   }
+  return null;
+}
+
+function statusOf(
+  threads: ReadonlyArray<WorkThread>,
+  pullRequests: ReadonlyArray<WorkPullRequest>,
+): Attention {
+  const needs = agentNeeds(threads) ?? pullRequestNeeds(pullRequests);
+  if (needs) return needs;
+  if (agentWorking(threads)) return { status: "working", reason: "Agent working" };
+  const waiting = pullRequestWaiting(pullRequests);
+  if (waiting) return waiting;
   if (threads.some((thread) => thread.backgroundLiveness === "monitoring")) {
     return { status: "waiting", reason: "Agent monitoring" };
   }
-  if (open.length > 0) return { status: "working", reason: "PR open" };
+  if (openPullRequests(pullRequests).length > 0) return { status: "working", reason: "PR open" };
   if (threads.some((thread) => thread.archivedAt === null && thread.settledAt === null)) {
     return { status: "working", reason: "T3 thread active" };
   }
   return { status: "done", reason: "Work completed" };
 }
 
-/** Group threads that refer to the same PR or Slack conversation, then derive attention. */
-export function buildWorkGroups(source: ReadonlyArray<WorkThread>): WorkGroup[] {
+export function slackTsToMs(ts: string): number {
+  return Math.floor(Number.parseFloat(ts) * 1000);
+}
+
+/** Newest activity in a conversation and the T3 threads working on it. */
+function lastActivityMs(conversation: SlackThread, threads: ReadonlyArray<WorkThread>): number {
+  return Math.max(
+    slackTsToMs(conversation.ts),
+    conversation.latestReplyTs ? slackTsToMs(conversation.latestReplyTs) : 0,
+    conversation.lastReply ? slackTsToMs(conversation.lastReply.ts) : 0,
+    ...threads.map((thread) => Date.parse(thread.updatedAt) || 0),
+  );
+}
+
+/**
+ * Whether one of your Slack conversations needs you. Anything waiting on you comes first, then
+ * agents at work, then whoever the conversation is waiting on. A conversation where you or
+ * Devin spoke last and nothing is open goes quiet into Done after {@link WORK_QUIET_MS}.
+ */
+function conversationStatusOf(
+  conversation: SlackThread,
+  threads: ReadonlyArray<WorkThread>,
+  pullRequests: ReadonlyArray<WorkPullRequest>,
+  markedDone: boolean,
+  now: number,
+): Attention {
+  const tick = slackThreadDoneReason({ ...conversation, pullRequests: [] });
+  if (tick) return { status: "done", reason: tick };
+  if (markedDone) return { status: "done", reason: "Marked done" };
+  const needs = agentNeeds(threads);
+  if (needs) return needs;
+  const sessions = conversation.devin?.sessions ?? [];
+  if (sessions.some((session) => session.state === "waiting")) {
+    return { status: "needs", reason: "Devin is waiting for you" };
+  }
+  if (sessions.some((session) => session.state === "error")) {
+    return { status: "needs", reason: "Devin stopped with an error" };
+  }
+  const pullRequestProblem = pullRequestNeeds(pullRequests);
+  if (pullRequestProblem) return pullRequestProblem;
+  const lastReply = conversation.lastReply;
+  if (lastReply?.by === "other")
+    return { status: "needs", reason: `${lastReply.authorName} replied` };
+  if (!lastReply && !conversation.startedByMe) return { status: "needs", reason: "No reply yet" };
+  if (agentWorking(threads)) return { status: "working", reason: "Agent working" };
+  const lastDevinMs = conversation.devin ? slackTsToMs(conversation.devin.lastMessageTs) : 0;
+  const devinWorking =
+    sessions.some((session) => session.state === "working") ||
+    (conversation.devin !== undefined &&
+      !conversation.devin.stopped &&
+      sessions.every((session) => session.state === undefined) &&
+      lastReply?.by === "devin" &&
+      now - lastDevinMs < DEVIN_RECENT_MS);
+  if (devinWorking) return { status: "working", reason: "Devin working" };
+  const states = [
+    ...(conversation.pullRequests ?? []).map((request) => request.state),
+    ...pullRequests.map((request) => request.snapshot?.state),
+  ];
+  if (states.length > 0 && states.every((state) => state === "merged" || state === "closed")) {
+    const merged = states.every((state) => state === "merged");
+    const count = new Set([
+      ...(conversation.pullRequests ?? []).map((request) => request.url),
+      ...pullRequests.map((request) => request.url),
+    ]).size;
+    return {
+      status: "done",
+      reason: merged ? (count === 1 ? "PR merged" : "PRs merged") : "PRs merged or closed",
+    };
+  }
+  const waiting = pullRequestWaiting(pullRequests);
+  if (waiting) return waiting;
+  const quiet = now - lastActivityMs(conversation, threads) > WORK_QUIET_MS;
+  if (lastReply?.by === "devin") {
+    if (quiet) return { status: "done", reason: "Quiet for 3 days" };
+    return {
+      status: "needs",
+      reason: sessions.some((session) => session.state === "finished")
+        ? "Devin finished"
+        : "Devin replied",
+    };
+  }
+  if (lastReply?.by === "me") {
+    if (quiet) return { status: "done", reason: "Quiet for 3 days" };
+    return { status: "waiting", reason: "Waiting for a reply" };
+  }
+  if (threads.some((thread) => thread.backgroundLiveness === "monitoring")) {
+    return { status: "waiting", reason: "Agent monitoring" };
+  }
+  const slackOpen = (conversation.pullRequests ?? []).some((request) => request.state === "open");
+  if (slackOpen || openPullRequests(pullRequests).length > 0) {
+    return { status: "working", reason: "PR open" };
+  }
+  if (threads.some((thread) => thread.archivedAt === null && thread.settledAt === null)) {
+    return { status: "working", reason: "T3 thread active" };
+  }
+  if (quiet) return { status: "done", reason: "Quiet for 3 days" };
+  return { status: "waiting", reason: "Following" };
+}
+
+function slackKey(url: string): string {
+  return `slack:${parseSlackThreadUrl(url)?.url ?? url}`;
+}
+
+/**
+ * Group threads and Slack conversations that refer to the same PR or Slack conversation, then
+ * derive attention. A group with one of your conversations is led by it; the rest are T3 work.
+ */
+export function buildWorkGroups(
+  source: ReadonlyArray<WorkThread>,
+  options: {
+    readonly conversations?: ReadonlyArray<SlackThread>;
+    readonly dismissed?: ReadonlyArray<SlackDismissedThread>;
+    readonly now?: number;
+  } = {},
+): WorkGroup[] {
+  const conversations = options.conversations ?? [];
+  const now = options.now ?? Date.now();
   const threads = source.filter(
     (thread) =>
       thread.archivedAt === null ||
       pullRequestsOf(thread).length > 0 ||
       (thread.linkedSlackThreads?.length ?? 0) > 0,
   );
-  const parent = threads.map((_, index) => index);
+  // Nodes are threads first, then conversations.
+  const size = threads.length + conversations.length;
+  const parent = Array.from({ length: size }, (_, index) => index);
   const find = (index: number): number => {
     let root = index;
     while (parent[root] !== root) root = parent[root]!;
@@ -148,29 +302,58 @@ export function buildWorkGroups(source: ReadonlyArray<WorkThread>): WorkGroup[] 
     return root;
   };
   const seen = new Map<string, number>();
-  for (const [index, thread] of threads.entries()) {
-    const keys = [
-      ...pullRequestsOf(thread).map((request) => `pr:${request.key}`),
-      ...(thread.linkedSlackThreads ?? []).map(
-        (url) => `slack:${parseSlackThreadUrl(url)?.url ?? url}`,
-      ),
-    ];
+  const join = (index: number, keys: ReadonlyArray<string>) => {
     for (const key of keys) {
       const other = seen.get(key);
       if (other === undefined) seen.set(key, index);
       else parent[find(index)] = find(other);
     }
-  }
-  const buckets = new Map<number, WorkThread[]>();
+  };
   for (const [index, thread] of threads.entries()) {
+    join(index, [
+      ...pullRequestsOf(thread).map((request) => `pr:${request.key}`),
+      ...(thread.linkedSlackThreads ?? []).map(slackKey),
+    ]);
+  }
+  for (const [offset, conversation] of conversations.entries()) {
+    join(threads.length + offset, [
+      slackKey(conversation.permalink),
+      ...(conversation.pullRequests ?? []).map(
+        (request) =>
+          `pr:${threadPullRequestKeyOf({
+            host: "github.com",
+            repository: request.repository,
+            number: request.number,
+            url: request.url,
+          })}`,
+      ),
+    ]);
+  }
+  const buckets = new Map<number, number[]>();
+  for (let index = 0; index < size; index += 1) {
     const root = find(index);
     const bucket = buckets.get(root) ?? [];
-    bucket.push(thread);
+    bucket.push(index);
     buckets.set(root, bucket);
   }
-  return [...buckets.values()].map((group): WorkGroup => {
+  const dismissedAt = new Map(
+    (options.dismissed ?? []).map((ref) => [
+      `${ref.channelId}:${ref.ts}`,
+      ref.at ?? Number.POSITIVE_INFINITY,
+    ]),
+  );
+  return [...buckets.values()].map((members): WorkGroup => {
+    const group = members.filter((index) => index < threads.length).map((index) => threads[index]!);
+    // Rarely two of your conversations share a PR; the most recent one leads.
+    const conversation =
+      members
+        .filter((index) => index >= threads.length)
+        .map((index) => conversations[index - threads.length]!)
+        .toSorted((left, right) => lastActivityMs(right, []) - lastActivityMs(left, []))[0] ?? null;
     const pullRequests = new Map<string, WorkPullRequest>();
     const slackLinks = new Set<string>();
+    if (conversation)
+      slackLinks.add(parseSlackThreadUrl(conversation.permalink)?.url ?? conversation.permalink);
     for (const thread of group) {
       for (const request of pullRequestsOf(thread)) {
         const previous = pullRequests.get(request.key);
@@ -183,13 +366,33 @@ export function buildWorkGroups(source: ReadonlyArray<WorkThread>): WorkGroup[] 
     }
     const ordered = group.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     const requests = [...pullRequests.values()];
+    if (conversation) {
+      const doneAt = dismissedAt.get(`${conversation.channelId}:${conversation.ts}`);
+      const reopened =
+        conversation.lastReply?.by === "other" &&
+        doneAt !== undefined &&
+        slackTsToMs(conversation.lastReply.ts) > doneAt;
+      const markedDone = doneAt !== undefined && !reopened;
+      return {
+        id: `slack:${conversation.channelId}:${conversation.ts}`,
+        conversation,
+        threads: ordered,
+        pullRequests: requests,
+        slackLinks: [...slackLinks],
+        ...conversationStatusOf(conversation, ordered, requests, markedDone, now),
+        updatedAt: new Date(lastActivityMs(conversation, ordered)).toISOString(),
+        markedDone,
+      };
+    }
     return {
       id: group.map((thread) => `${thread.environmentId}:${thread.id}`).toSorted()[0]!,
+      conversation: null,
       threads: ordered,
       pullRequests: requests,
       slackLinks: [...slackLinks],
       ...statusOf(group, requests),
       updatedAt: ordered[0]!.updatedAt,
+      markedDone: false,
     };
   });
 }

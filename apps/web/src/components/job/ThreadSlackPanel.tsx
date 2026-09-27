@@ -1,6 +1,7 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   parseSlackThreadUrl,
+  SLACK_FOLLOW_REACTION,
   type ScopedThreadRef,
   type SlackThreadDetail,
 } from "@t3tools/contracts";
@@ -118,6 +119,7 @@ function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url
 export function ThreadSlackPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
   const thread = useThreadShell(threadRef);
   const update = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
+  const follow = useAtomCommand(slackEnvironment.setReaction, { reportFailure: false });
   const links = thread?.linkedSlackThreads ?? [];
   const [input, setInput] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
@@ -168,6 +170,16 @@ export function ThreadSlackPanel({ threadRef }: { threadRef: ScopedThreadRef }) 
               if (saved) {
                 setSelected(parsed.url);
                 setInput("");
+                // A linked conversation is one of yours on the Work page; 👀 is how that is kept.
+                void follow({
+                  environmentId: threadRef.environmentId,
+                  input: {
+                    channelId: parsed.channelId,
+                    ts: parsed.ts,
+                    name: SLACK_FOLLOW_REACTION,
+                    reacted: true,
+                  },
+                });
               }
             });
           }}

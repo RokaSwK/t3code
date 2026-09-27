@@ -14,13 +14,16 @@
  */
 import { Effect, Schema } from "effect";
 
+import { PullRequestState } from "./pullRequest.ts";
+
 /** Registered in the Slack app manifest; Slack matches it exactly. */
 export const SLACK_OAUTH_LOOPBACK_PORT = 38117;
 export const SLACK_OAUTH_REDIRECT_URI = `http://localhost:${SLACK_OAUTH_LOOPBACK_PORT}/slack/callback`;
 
 /**
- * Read channels, group messages, and direct messages, resolve people and custom emoji, and
- * read and write reactions. Direct messages are read only for followed threads.
+ * Read channels, group messages, and direct messages, resolve people and custom emoji, read and
+ * write reactions, and search for Devin's messages. Direct messages are read only for threads
+ * that are yours.
  */
 export const SLACK_USER_SCOPES = [
   "channels:read",
@@ -35,6 +38,7 @@ export const SLACK_USER_SCOPES = [
   "emoji:read",
   "reactions:read",
   "reactions:write",
+  "search:read",
 ] as const;
 
 /** The manifest the "Create Slack app" link prefills. */
@@ -100,11 +104,62 @@ export const SlackMessage = Schema.Struct({
 });
 export type SlackMessage = typeof SlackMessage.Type;
 
+/** A GitHub pull request linked from a thread, or from any message in one of your conversations. */
+export const SlackPullRequest = Schema.Struct({
+  url: Schema.String,
+  /** `owner/name`. */
+  repository: Schema.String,
+  number: Schema.Number,
+  /** Absent until GitHub answers, or when the PR cannot be read. */
+  state: Schema.optional(PullRequestState),
+});
+export type SlackPullRequest = typeof SlackPullRequest.Type;
+
+/** Who wrote the newest reply in a conversation. Devin is an agent, not a person waiting. */
+export const SlackReplyAuthor = Schema.Literals(["me", "devin", "other"]);
+export type SlackReplyAuthor = typeof SlackReplyAuthor.Type;
+
+/** A Devin session's state, from Devin's API. */
+export const DevinSessionState = Schema.Literals([
+  "working",
+  "waiting",
+  "finished",
+  "suspended",
+  "error",
+]);
+export type DevinSessionState = typeof DevinSessionState.Type;
+
+/** A Devin session working in a Slack conversation, found from its session links. */
+export const SlackDevinSession = Schema.Struct({
+  id: Schema.String,
+  url: Schema.String,
+  /** Absent without a Devin API key, or until Devin answers. */
+  state: Schema.optional(DevinSessionState),
+  title: Schema.optional(Schema.String),
+});
+export type SlackDevinSession = typeof SlackDevinSession.Type;
+
 export const SlackThread = Schema.Struct({
   ...SlackMessage.fields,
   channelName: Schema.String,
   channelKind: SlackChannelKind,
   permalink: Schema.String,
+  pullRequests: Schema.optional(Schema.Array(SlackPullRequest)),
+  /** The rest is read for your conversations only; feed threads leave it out. */
+  startedByMe: Schema.optional(Schema.Boolean),
+  /** You reacted with the follow reaction. */
+  followed: Schema.optional(Schema.Boolean),
+  lastReply: Schema.optional(
+    Schema.Struct({ by: SlackReplyAuthor, authorName: Schema.String, ts: Schema.String }),
+  ),
+  devin: Schema.optional(
+    Schema.Struct({
+      sessions: Schema.Array(SlackDevinSession),
+      /** Devin's newest message says the session stopped until tagged again. */
+      stopped: Schema.Boolean,
+      lastMessageTs: Schema.String,
+    }),
+  ),
 });
 export type SlackThread = typeof SlackThread.Type;
 
@@ -120,6 +175,10 @@ export const SlackConnection = Schema.Union([
     clientId: Schema.String,
     authorizeUrl: Schema.String,
     error: Schema.optional(Schema.String),
+    /** Signing in again while connected; the feed keeps running meanwhile. */
+    connectedAs: Schema.optional(
+      Schema.Struct({ teamName: Schema.String, userName: Schema.String }),
+    ),
   }),
   Schema.Struct({
     status: Schema.Literal("connected"),
@@ -128,6 +187,8 @@ export const SlackConnection = Schema.Union([
     teamUrl: Schema.String,
     userId: Schema.String,
     userName: Schema.String,
+    /** Permissions this sign-in lacks; signing in again grants them. */
+    missingScopes: Schema.optional(Schema.Array(Schema.String)),
   }),
 ]);
 export type SlackConnection = typeof SlackConnection.Type;
@@ -150,30 +211,61 @@ export const SlackThreadRef = Schema.Struct({
 });
 export type SlackThreadRef = typeof SlackThreadRef.Type;
 
+export const SlackDismissedThread = Schema.Struct({
+  ...SlackThreadRef.fields,
+  /** When it was marked done, in ms; a later reply from someone else reopens it. */
+  at: Schema.optional(Schema.Number),
+});
+export type SlackDismissedThread = typeof SlackDismissedThread.Type;
+
+/** The Devin API key on this server. The key itself never leaves the server. */
+export const DevinConnection = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("disconnected"), error: Schema.optional(Schema.String) }),
+  Schema.Struct({
+    status: Schema.Literal("connected"),
+    name: Schema.String,
+    orgId: Schema.String,
+    error: Schema.optional(Schema.String),
+  }),
+]);
+export type DevinConnection = typeof DevinConnection.Type;
+
 export const SlackState = Schema.Struct({
   connection: SlackConnection,
   sync: SlackSync,
   /** Newest first, capped. */
   threads: Schema.Array(SlackThread),
   /**
-   * Threads the user marked with :eyes:, anywhere in the workspace and however old, newest
-   * first. Reading the reaction back from Slack makes the mark the only state to manage.
+   * Your conversations, newest activity first: threads you marked with :eyes: anywhere in the
+   * workspace, and Devin threads you started or wrote in. Both are read back from Slack, so
+   * the reaction and the messages are the only state to manage.
    */
-  followed: Schema.Array(SlackThread).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  conversations: Schema.Array(SlackThread).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /**
-   * New threads the user dismissed from the Job page. Kept on the server so every device
-   * agrees; the client hides them from the new list and offers them back under a toggle.
+   * Threads the user marked done on the Work page. Kept on the server so every device agrees.
    */
-  dismissed: Schema.Array(SlackThreadRef).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  dismissed: Schema.Array(SlackDismissedThread).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   /** Exclusions apply to the new-thread feed, while followed threads remain available. */
   excludedChannelIds: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  devin: DevinConnection.pipe(
+    Schema.withDecodingDefault(Effect.succeed({ status: "disconnected" as const })),
   ),
 });
 export type SlackState = typeof SlackState.Type;
 
 /** The reaction that marks a Slack thread as followed. */
 export const SLACK_FOLLOW_REACTION = "eyes";
+
+/** Anyone reacting with a tick to a thread's root marks the conversation done. */
+export const SLACK_DONE_REACTIONS: ReadonlySet<string> = new Set([
+  "white_check_mark",
+  "heavy_check_mark",
+  "ballot_box_with_check",
+]);
 
 /** A workspace member who can own T3 threads. */
 export const SlackMember = Schema.Struct({
@@ -220,6 +312,11 @@ export const SlackSetDismissedInput = Schema.Struct({
   dismissed: Schema.Boolean,
 });
 export type SlackSetDismissedInput = typeof SlackSetDismissedInput.Type;
+
+export const DevinConnectInput = Schema.Struct({
+  apiKey: Schema.String.check(Schema.isMinLength(8)),
+});
+export type DevinConnectInput = typeof DevinConnectInput.Type;
 
 export const SlackSetChannelExcludedInput = Schema.Struct({
   channelId: Schema.String,
