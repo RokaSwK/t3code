@@ -184,6 +184,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.slackListMembers]: AuthOrchestrationReadScope,
   [WS_METHODS.slackSetConversationOwner]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackSetConversationWait]: AuthOrchestrationOperateScope,
+  [WS_METHODS.slackSetReplyDraft]: AuthOrchestrationOperateScope,
+  [WS_METHODS.slackSendReply]: AuthOrchestrationOperateScope,
   [WS_METHODS.devinConnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.devinDisconnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeSlackState]: AuthOrchestrationReadScope,

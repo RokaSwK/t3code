@@ -1,7 +1,7 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { EllipsisIcon, MessageCircleIcon } from "lucide-react";
+import { EllipsisIcon, MessageCircleIcon, PencilLineIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
@@ -80,9 +80,11 @@ function syncLabel(sync: SlackState["sync"]): string {
 function ConversationSignals({
   group,
   devinAvatarUrl,
+  hasDraft,
 }: {
   readonly group: WorkGroup;
   readonly devinAvatarUrl: string | undefined;
+  readonly hasDraft: boolean;
 }) {
   const conversation = group.conversation!;
   const session = conversation.devin?.sessions.at(-1);
@@ -90,6 +92,7 @@ function ConversationSignals({
   const pullRequest = conversation.pullRequests?.[0];
   return (
     <>
+      {hasDraft ? <PencilLineIcon aria-label="Reply drafted" className="size-3.5" /> : null}
       {session ? (
         <DevinLogo
           url={devinAvatarUrl}
@@ -328,11 +331,14 @@ function selectionFor(list: WorkList, id: string | null): WorkSelection | null {
 function ConversationRows({
   groups,
   devinAvatarUrl,
+  draftKeys,
   selectedId,
   onSelect,
 }: {
   readonly groups: ReadonlyArray<WorkGroup>;
   readonly devinAvatarUrl: string | undefined;
+  /** `channel:ts` of conversations with a reply drafted. */
+  readonly draftKeys: ReadonlySet<string>;
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
 }) {
@@ -344,7 +350,13 @@ function ConversationRows({
         selected={selectedId === `c:${group.id}`}
         glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
         title={slackMessageSummary(group.conversation.markdown)}
-        signals={<ConversationSignals group={group} devinAvatarUrl={devinAvatarUrl} />}
+        signals={
+          <ConversationSignals
+            group={group}
+            devinAvatarUrl={devinAvatarUrl}
+            hasDraft={draftKeys.has(`${group.conversation.channelId}:${group.conversation.ts}`)}
+          />
+        }
         meta={<SlackMeta thread={group.conversation} reason={group.reason} />}
         updatedAt={group.updatedAt}
         onSelect={onSelect}
@@ -503,6 +515,10 @@ export function JobPage() {
   const [managingChannels, setManagingChannels] = useState(false);
   const [choosingFolders, setChoosingFolders] = useState(false);
   const selection = selectionFor(list, selectedId);
+  const draftKeys = useMemo(
+    () => new Set((state?.replyDrafts ?? []).map((draft) => `${draft.channelId}:${draft.ts}`)),
+    [state?.replyDrafts],
+  );
   // Escape closes the open item before it leaves the page.
   const closeSelection = useCallback(() => setSelectedId(null), []);
   useEscapeToGoBack(selection ? closeSelection : undefined);
@@ -596,6 +612,7 @@ export function JobPage() {
                     <WorkGroupHeader label={label} count={groups.length} />
                     <ConversationRows
                       devinAvatarUrl={state?.devinAvatarUrl}
+                      draftKeys={draftKeys}
                       groups={groups}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
@@ -668,6 +685,7 @@ export function JobPage() {
                   {showWatching ? (
                     <ConversationRows
                       devinAvatarUrl={state?.devinAvatarUrl}
+                      draftKeys={draftKeys}
                       groups={list.watching}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
@@ -687,6 +705,7 @@ export function JobPage() {
                   {showDone ? (
                     <ConversationRows
                       devinAvatarUrl={state?.devinAvatarUrl}
+                      draftKeys={draftKeys}
                       groups={list.done}
                       selectedId={selectedId}
                       onSelect={setSelectedId}

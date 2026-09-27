@@ -100,6 +100,7 @@ function fakeSlack(
     },
     "users.info": { ok: true },
     "reactions.add": { ok: true },
+    "chat.postMessage": { ok: true, ts: nowTs(0) },
     "reactions.remove": { ok: true },
     // A thread the user marked with :eyes: in a direct message they do not poll, plus a mark
     // on a reply that must resolve to its parent in #general.
@@ -869,5 +870,52 @@ describe("SlackService", () => {
         assert.deepStrictEqual(back.conversationOwners, []);
       }).pipe(Effect.provide(layer));
     });
+  });
+
+  it.live("keeps a drafted reply until it is sent into the thread", () => {
+    const calls: Array<SlackCall> = [];
+    const secrets = new Map<string, Uint8Array>([
+      [
+        "slack-connection",
+        new TextEncoder().encode(
+          JSON.stringify({
+            clientId: "123.456",
+            accessToken: "xoxp-test",
+            teamName: "Acme",
+            teamUrl: "https://acme.slack.com/",
+            userId: "U1",
+            userName: "ada",
+          }),
+        ),
+      ],
+    ]);
+    const ref = { channelId: "C1", ts: "1700000000.000100" };
+    return Effect.gen(function* () {
+      const slack = yield* SlackService.SlackService;
+      yield* slack.setReplyDraft({ ...ref, text: "  Looking at it now  ", by: "agent" });
+      const drafted = yield* waitForState((state) => state.replyDrafts.length === 1);
+      assert.deepStrictEqual(
+        drafted.replyDrafts.map(({ text, by }) => ({ text, by })),
+        [{ text: "Looking at it now", by: "agent" }],
+      );
+      assert.isTrue(secrets.has("slack-reply-drafts"));
+
+      yield* slack.sendReply({ ...ref, text: "Looking at it now" });
+      const post = calls.find((call) => call.method === "chat.postMessage");
+      assert.strictEqual(post?.params.get("channel"), "C1");
+      assert.strictEqual(post?.params.get("thread_ts"), ref.ts);
+      assert.strictEqual(post?.params.get("text"), "Looking at it now");
+      const sent = yield* waitForState((state) => state.replyDrafts.length === 0);
+      assert.deepStrictEqual(sent.replyDrafts, []);
+    }).pipe(
+      Effect.provide(
+        SlackService.layer.pipe(
+          Layer.provide(fakeSlack(calls, new Set())),
+          Layer.provide(memorySecrets(secrets)),
+          Layer.provide(NodeServices.layer),
+          Layer.provide(fakeGitHub),
+        ),
+      ),
+    );
   });
 });

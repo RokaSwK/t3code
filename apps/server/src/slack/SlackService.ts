@@ -53,6 +53,8 @@ import {
   type SlackSetChannelExcludedInput,
   type SlackSetConversationOwnerInput,
   type SlackSetConversationWaitInput,
+  type SlackSetReplyDraftInput,
+  type SlackSendReplyInput,
   type SlackChannel,
   type SlackPullRequest,
   type SlackState,
@@ -129,6 +131,7 @@ const CLIENT_ID_SECRET = "slack-client-id";
 const DISMISSED_SECRET = "slack-dismissed-threads";
 const OWNERS_SECRET = "slack-conversation-owners";
 const WAITS_SECRET = "slack-conversation-waits";
+const DRAFTS_SECRET = "slack-reply-drafts";
 const EXCLUDED_CHANNELS_SECRET = "slack-excluded-channels";
 const INBOX_START_SECRET = "slack-inbox-start";
 /** `{ apiKey, orgId, name }` for Devin's API. */
@@ -218,6 +221,22 @@ const StoredWaits = Schema.Struct({
 });
 const decodeStoredWaits = Schema.decodeUnknownOption(Schema.fromJsonString(StoredWaits));
 const encodeStoredWaits = Schema.encodeSync(Schema.fromJsonString(StoredWaits));
+
+const ReplyDraft = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  text: Schema.String,
+  by: Schema.Literals(["you", "agent"]),
+  at: Schema.Number,
+});
+type ReplyDraft = typeof ReplyDraft.Type;
+const StoredDrafts = Schema.Struct({
+  teamUrl: Schema.String,
+  userId: Schema.String,
+  drafts: Schema.Array(ReplyDraft),
+});
+const decodeStoredDrafts = Schema.decodeUnknownOption(Schema.fromJsonString(StoredDrafts));
+const encodeStoredDrafts = Schema.encodeSync(Schema.fromJsonString(StoredDrafts));
 
 const StoredExcludedChannels = Schema.Struct({
   teamUrl: Schema.String,
@@ -427,6 +446,12 @@ export class SlackService extends Context.Service<
     readonly setConversationWait: (
       input: SlackSetConversationWaitInput,
     ) => Effect.Effect<void, SlackError>;
+    /** Saves or clears a reply draft; the Work agent's are marked as its own. */
+    readonly setReplyDraft: (
+      input: SlackSetReplyDraftInput & { readonly by: "you" | "agent" },
+    ) => Effect.Effect<void, SlackError>;
+    /** Posts a reply in the conversation as the user and clears its draft. */
+    readonly sendReply: (input: SlackSendReplyInput) => Effect.Effect<void, SlackError>;
     readonly getChannels: Effect.Effect<ReadonlyArray<SlackChannel>, SlackError>;
     readonly setChannelExcluded: (
       input: SlackSetChannelExcludedInput,
@@ -537,6 +562,9 @@ const make = Effect.gen(function* () {
   let dismissed: ReadonlyArray<SlackDismissedThread> = [];
   let conversationOwners: ReadonlyArray<ConversationOwner> = [];
   let conversationWaits: ReadonlyArray<ConversationWait> = [];
+  let replyDrafts: ReadonlyArray<ReplyDraft> = [];
+  /** The scopes Slack says this token has, from any call's response; unknown until then. */
+  let grantedScopes: ReadonlySet<string> | undefined;
   const ownerWrites = yield* Semaphore.make(1);
   let inboxStartedAtMs = 0;
   const dismissedWrites = yield* Semaphore.make(1);
@@ -644,7 +672,7 @@ const make = Effect.gen(function* () {
             teamUrl: connection.teamUrl,
             userId: connection.userId,
             userName: connection.userName,
-            ...(searchScopeMissing ? { missingScopes: ["search:read"] } : {}),
+            ...(missingScopes().length > 0 ? { missingScopes: missingScopes() } : {}),
           }
         : {
             status: "disconnected",
@@ -673,6 +701,7 @@ const make = Effect.gen(function* () {
       dismissed: connection ? dismissed : [],
       conversationOwners: connection ? conversationOwners : [],
       conversationWaits: connection ? conversationWaits : [],
+      replyDrafts: connection ? replyDrafts : [],
       reviewRequests: connection ? reviewRequests : [],
       authoredPullRequests: connection ? authoredPullRequests : [],
       excludedChannelIds: connection ? [...excludedChannelIds] : [],
@@ -687,6 +716,11 @@ const make = Effect.gen(function* () {
         : { status: "disconnected", ...(devinError ? { error: devinError } : {}) },
     };
   };
+
+  function missingScopes(): ReadonlyArray<string> {
+    if (grantedScopes) return SLACK_USER_SCOPES.filter((scope) => !grantedScopes!.has(scope));
+    return searchScopeMissing ? ["search:read"] : [];
+  }
 
   const stateRef = yield* SubscriptionRef.make<SlackState>(
     snapshot(yield* Clock.currentTimeMillis),
@@ -876,6 +910,20 @@ const make = Effect.gen(function* () {
         : [];
   });
 
+  const loadDrafts = Effect.gen(function* () {
+    const stored = yield* secrets.get(DRAFTS_SECRET).pipe(
+      Effect.map(Option.flatMap((bytes) => decodeStoredDrafts(new TextDecoder().decode(bytes)))),
+      Effect.orElseSucceed(() => Option.none<typeof StoredDrafts.Type>()),
+    );
+    replyDrafts =
+      connection &&
+      Option.isSome(stored) &&
+      stored.value.teamUrl === connection.teamUrl &&
+      stored.value.userId === connection.userId
+        ? stored.value.drafts
+        : [];
+  });
+
   const loadExcludedChannels = Effect.gen(function* () {
     const stored = yield* secrets.get(EXCLUDED_CHANNELS_SECRET).pipe(
       Effect.map(
@@ -943,6 +991,13 @@ const make = Effect.gen(function* () {
       const response = yield* httpClient.execute(
         token ? request.pipe(HttpClientRequest.bearerToken(token)) : request,
       );
+      // Slack names the token's scopes on every call, so a missing one shows before it is used.
+      const scopes = response.headers["x-oauth-scopes"];
+      if (token && typeof scopes === "string" && scopes.length > 0) {
+        const next = new Set(scopes.split(",").map((scope) => scope.trim()));
+        if (grantedScopes === undefined || next.size !== grantedScopes.size) dirty = true;
+        grantedScopes = next;
+      }
       if (response.status === 429) {
         const retryAfterSeconds = Number(response.headers["retry-after"]) || 30;
         limiter.pause(method, (yield* Clock.currentTimeMillis) + retryAfterSeconds * 1000);
@@ -1755,6 +1810,8 @@ const make = Effect.gen(function* () {
       dismissed = [];
       conversationOwners = [];
       conversationWaits = [];
+      replyDrafts = [];
+      grantedScopes = undefined;
       excludedChannelIds = new Set();
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
@@ -1817,6 +1874,7 @@ const make = Effect.gen(function* () {
     yield* loadExcludedChannels;
     yield* loadOwners;
     yield* loadWaits;
+    yield* loadDrafts;
     yield* loadInboxStart;
     connectionError = undefined;
     lastClientId = next.clientId;
@@ -2213,6 +2271,69 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const writeDrafts = (current: StoredConnection, next: ReadonlyArray<ReplyDraft>) =>
+    secrets
+      .set(
+        DRAFTS_SECRET,
+        new TextEncoder().encode(
+          encodeStoredDrafts({ teamUrl: current.teamUrl, userId: current.userId, drafts: next }),
+        ),
+      )
+      .pipe(Effect.mapError(() => slackError("set_draft", "Could not save the draft.")));
+
+  const setReplyDraft = Effect.fn("slack.set_reply_draft")(function* (
+    input: SlackSetReplyDraftInput & { readonly by: "you" | "agent" },
+  ) {
+    yield* ownerWrites.withPermit(
+      Effect.gen(function* () {
+        const current = connection;
+        if (!current) return yield* slackError("set_draft", "Slack is not connected.");
+        const others = replyDrafts.filter(
+          (draft) => !(draft.channelId === input.channelId && draft.ts === input.ts),
+        );
+        const text = input.text?.trim();
+        const next = text
+          ? [
+              ...others,
+              {
+                channelId: input.channelId,
+                ts: input.ts,
+                text,
+                by: input.by,
+                at: yield* Clock.currentTimeMillis,
+              },
+            ]
+          : others;
+        yield* writeDrafts(current, next);
+        replyDrafts = next;
+        yield* publish;
+      }),
+    );
+  });
+
+  const sendReply = Effect.fn("slack.send_reply")(function* (input: SlackSendReplyInput) {
+    if (!connection) return yield* slackError("send_reply", "Slack is not connected.");
+    yield* call(
+      "chat.postMessage",
+      { channel: input.channelId, thread_ts: input.ts, text: input.text },
+      "interactive",
+    ).pipe(
+      Effect.mapError((error) =>
+        error.message === "missing_scope"
+          ? slackError(
+              "send_reply",
+              "Sign in to Slack again in Settings → Work to reply from here.",
+            )
+          : error,
+      ),
+    );
+    yield* setReplyDraft({ channelId: input.channelId, ts: input.ts, text: null, by: "you" });
+    // Read the conversation back so it shows your reply and waits on the others.
+    const entry = conversations.get(conversationKey(input));
+    if (entry) entry.nextReadAt = 0;
+    yield* Deferred.succeed(wake, undefined);
+  });
+
   const getChannels = Effect.gen(function* () {
     if (!connection) return yield* slackError("get_channels", "Slack is not connected.");
     return [...channels.values()]
@@ -2413,6 +2534,7 @@ const make = Effect.gen(function* () {
     yield* loadExcludedChannels;
     yield* loadOwners;
     yield* loadWaits;
+    yield* loadDrafts;
     yield* loadInboxStart;
     lastClientId = stored.value.clientId;
     yield* startSync(true);
@@ -2435,6 +2557,8 @@ const make = Effect.gen(function* () {
     setDismissed,
     setConversationOwner,
     setConversationWait,
+    setReplyDraft,
+    sendReply,
     getChannels,
     setChannelExcluded,
     listMembers,

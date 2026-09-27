@@ -77,6 +77,14 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:set-conversation-wait",
       tag: WS_METHODS.slackSetConversationWait,
     }),
+    setReplyDraft: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-reply-draft",
+      tag: WS_METHODS.slackSetReplyDraft,
+    }),
+    sendReply: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:send-reply",
+      tag: WS_METHODS.slackSendReply,
+    }),
     devinConnect: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:devin-connect",
       tag: WS_METHODS.devinConnect,

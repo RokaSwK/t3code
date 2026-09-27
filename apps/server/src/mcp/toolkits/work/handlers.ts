@@ -54,8 +54,9 @@ export function workStatusName(group: WorkGroup): WorkStatusName {
   return group.owner !== null && group.status !== "done" ? "watching" : group.status;
 }
 
-function workItemOf(group: WorkGroup): WorkItem {
+function workItemOf(group: WorkGroup, draftOf: (key: string) => string | undefined): WorkItem {
   const conversation = group.conversation;
+  const draft = conversation ? draftOf(`${conversation.channelId}:${conversation.ts}`) : undefined;
   return {
     id: group.id,
     status: workStatusName(group),
@@ -71,6 +72,7 @@ function workItemOf(group: WorkGroup): WorkItem {
             ...(conversation.lastReply ? { lastReplyBy: conversation.lastReply.authorName } : {}),
             ...(group.owner ? { owner: group.owner.name } : {}),
             ...(group.waitingOn ? { waitingOn: group.waitingOn.name } : {}),
+            ...(draft ? { draft } : {}),
             followed: conversation.followed === true,
           },
         }
@@ -177,7 +179,13 @@ export function buildWorkOverview(input: {
     .filter((group) => wanted.has(workStatusName(group)))
     .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, input.limit)
-    .map(workItemOf);
+    .map((group) =>
+      workItemOf(
+        group,
+        (key) =>
+          input.slack.replyDrafts.find((draft) => `${draft.channelId}:${draft.ts}` === key)?.text,
+      ),
+    );
   const mine = new Set(
     input.slack.conversations.map((thread) => `${thread.channelId}:${thread.ts}`),
   );
@@ -377,6 +385,17 @@ const make = Effect.gen(function* () {
           updated.push(member ? `waiting on ${member.name}` : "no longer waiting");
         }
         return { updated };
+      }),
+
+    draft_slack_reply: (input) =>
+      Effect.gen(function* () {
+        yield* requireWork;
+        const ref = yield* conversationRef(input.permalink);
+        const text = input.text.trim();
+        yield* slack
+          .setReplyDraft({ channelId: ref.channelId, ts: ref.ts, text: text || null, by: "agent" })
+          .pipe(slackError);
+        return { saved: text.length > 0 };
       }),
 
     start_t3_thread: (input) =>

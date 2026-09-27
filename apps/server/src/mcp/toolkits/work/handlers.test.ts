@@ -83,6 +83,7 @@ const slackState = (overrides: Partial<SlackState>): SlackState => ({
   conversationWaits: [],
   reviewRequests: [],
   authoredPullRequests: [],
+  replyDrafts: [],
   devin: { status: "disconnected" },
   ...overrides,
 });

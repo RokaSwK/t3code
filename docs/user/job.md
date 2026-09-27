@@ -40,6 +40,16 @@ folders…** from the page's **…** menu to pick which project folders it comes
 saved on each connected server. Link a PR from a T3 thread using **Link pull request** in the
 command palette; created PRs link automatically.
 
+Pull requests from GitHub join your work too. A pull request waiting for your review is in
+**Needs me**. Your own open pull requests wait for review, and need you when checks fail, changes
+are requested, there is a merge conflict, or they are approved and ready to merge. Pull requests
+linked from a conversation get the same details. They are read with the GitHub CLI, every few
+minutes.
+
+To answer a conversation, write in **Reply** in its detail and choose **Send**; it posts in the
+Slack thread as you. What you type is kept as a draft until you send or discard it, and the Work
+agent can draft replies for you to review. Rows with a draft show a pencil.
+
 When a conversation is yours but blocked on someone, such as a reviewer, choose **Waiting on…**
 from its **…** menu. It shows as **Waiting** until someone else replies, then comes back to
 **Needs me**. A conversation with an open pull request where you or Devin had the last word also
@@ -49,8 +59,8 @@ counts as waiting for review.
 
 The Work agent is a T3 thread that sees your work the way this page does and can act on it. It
 reads your conversations, Devin sessions, pull requests, and other T3 threads; it can follow,
-mark done, hand off, or mark waiting; and it can start or message other T3 threads, asking you
-first. It does not post in Slack.
+mark done, hand off, or mark waiting; it drafts Slack replies for you to send; and it can start
+or message other T3 threads, asking you first. It never posts in Slack itself.
 
 Choose **Work agent** at the top of the page. The first time, it starts a thread in your Work
 folder with a triage prompt ready to send; after that it opens the same thread with a prompt to
@@ -80,8 +90,8 @@ To see whether each session is working, waiting for you, or finished, add a Devi
 **Settings → Work**. Create the key in your Devin organization's settings. It stays on your T3
 Code server. Without a key, T3 Code goes by Devin's messages in Slack instead.
 
-Finding Devin threads uses Slack search. If you connected Slack before this was added,
-**Settings → Work** asks you to sign in to Slack again.
+Finding Devin threads uses Slack search, and sending replies needs permission to post. When your
+Slack sign-in is missing either, **Settings → Work** says so and asks you to sign in again.
 
 ## New in your channels
 

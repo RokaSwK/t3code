@@ -21,6 +21,7 @@ const METHOD_TIERS: Record<string, SlackTier> = {
   "conversations.history": 3,
   "conversations.replies": 3,
   "reactions.add": 3,
+  "chat.postMessage": 3,
   "reactions.remove": 3,
   "users.info": 4,
   "auth.test": 4,

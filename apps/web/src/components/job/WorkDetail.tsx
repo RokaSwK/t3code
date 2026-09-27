@@ -20,13 +20,14 @@ import { useState, type ReactNode } from "react";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
-import { slackEnvironment } from "~/state/slack";
+import { slackEnvironment, useSlackState } from "~/state/slack";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { PullRequestStateGlyph } from "../pullRequest/pullRequestPresentation";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
@@ -190,6 +191,101 @@ function DevinRows({
       </button>
     );
   });
+}
+
+/**
+ * A reply to post in the conversation as the user. It opens with the saved draft, marked when
+ * the Work agent wrote it; the user edits and sends, or discards the draft.
+ */
+function ReplyBox({
+  environmentId,
+  thread,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly thread: SlackThread;
+}) {
+  const slack = useSlackState(environmentId);
+  const sendReply = useAtomCommand(slackEnvironment.sendReply, { reportFailure: false });
+  const setDraft = useAtomCommand(slackEnvironment.setReplyDraft, { reportFailure: false });
+  const draft = slack?.replyDrafts.find(
+    (entry) => entry.channelId === thread.channelId && entry.ts === thread.ts,
+  );
+  const [text, setText] = useState(draft?.text ?? "");
+  const [draftAt, setDraftAt] = useState(draft?.at);
+  const [sending, setSending] = useState(false);
+  // A draft saved while this is open replaces the text only if nothing was typed yet.
+  if (draft && draft.at !== draftAt) {
+    setDraftAt(draft.at);
+    if (text.trim() === "") setText(draft.text);
+  }
+  const canPost =
+    slack?.connection.status === "connected" &&
+    !(slack.connection.missingScopes ?? []).includes("chat:write");
+  const ref = { channelId: thread.channelId, ts: thread.ts };
+  return (
+    <Section title="Reply">
+      <div className="flex flex-col gap-2 px-2">
+        {draft?.by === "agent" ? (
+          <p className="text-xs text-muted-foreground">
+            Drafted by the Work agent. Edit before sending.
+          </p>
+        ) : null}
+        <Textarea
+          size="sm"
+          aria-label="Reply in Slack"
+          placeholder="Reply in the thread…"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={() => {
+            // Keep what was typed as the draft, so it survives closing the panel.
+            if (text.trim() !== (draft?.text ?? "")) {
+              void setDraft({ environmentId, input: { ...ref, text: text.trim() || null } });
+            }
+          }}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            size="xs"
+            disabled={!canPost || sending || text.trim() === ""}
+            onClick={() => {
+              setSending(true);
+              void sendReply({ environmentId, input: { ...ref, text: text.trim() } }).then(
+                (result) => {
+                  setSending(false);
+                  if (result._tag === "Failure") {
+                    toastManager.add({ type: "error", title: "Could not send the reply" });
+                    return;
+                  }
+                  setText("");
+                  toastManager.add({ type: "success", title: "Replied in Slack" });
+                },
+              );
+            }}
+          >
+            Send
+          </Button>
+          {draft ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={sending}
+              onClick={() => {
+                setText("");
+                void setDraft({ environmentId, input: { ...ref, text: null } });
+              }}
+            >
+              Discard draft
+            </Button>
+          ) : null}
+          {!canPost ? (
+            <span className="text-xs text-muted-foreground">
+              Sign in to Slack again in Settings → Work to reply from here.
+            </span>
+          ) : null}
+        </div>
+      </div>
+    </Section>
+  );
 }
 
 function PanelHeader({
@@ -448,6 +544,7 @@ function SlackDetail({
               <PullRequestRows threadRequests={threadRequests} slackRequests={slackRequests} />
             </Section>
           ) : null}
+          <ReplyBox environmentId={environmentId} thread={thread} />
           <Section title="Conversation">
             <div className="px-2 pt-1">
               <SlackConversationView environmentId={environmentId} thread={thread} />

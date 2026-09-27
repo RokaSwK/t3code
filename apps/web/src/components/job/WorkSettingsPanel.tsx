@@ -55,7 +55,11 @@ function SlackSettings({
       </div>
     );
   }
-  const missingSearch = connection.missingScopes?.includes("search:read") === true;
+  const missing = connection.missingScopes ?? [];
+  const missingNeeds = [
+    missing.includes("search:read") ? "find your Devin threads" : null,
+    missing.includes("chat:write") ? "send replies from T3 Code" : null,
+  ].filter((need) => need !== null);
   const signInAgain = () => {
     setPending(true);
     void connect({ environmentId, input: { clientId: connection.clientId } })
@@ -85,14 +89,14 @@ function SlackSettings({
       <SettingsRow
         title="Sign in again"
         description={
-          missingSearch
-            ? "Needed to find your Devin threads: this sign-in is missing Slack search."
+          missing.length > 0
+            ? `Needed to ${missingNeeds.join(" and ") || "use every feature"}: this sign-in is missing ${missing.join(", ")}.`
             : "Renews the sign-in and picks up permissions added since you connected."
         }
         control={
           <Button
             size="sm"
-            variant={missingSearch ? "default" : "outline"}
+            variant={missing.length > 0 ? "default" : "outline"}
             disabled={pending}
             onClick={signInAgain}
           >

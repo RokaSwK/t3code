@@ -22,8 +22,8 @@ export const SLACK_OAUTH_REDIRECT_URI = `http://localhost:${SLACK_OAUTH_LOOPBACK
 
 /**
  * Read channels, group messages, and direct messages, resolve people and custom emoji, read and
- * write reactions, and search for Devin's messages. Direct messages are read only for threads
- * that are yours.
+ * write reactions, search for Devin's messages, and post the replies you send from a draft.
+ * Direct messages are read only for threads that are yours.
  */
 export const SLACK_USER_SCOPES = [
   "channels:read",
@@ -39,6 +39,7 @@ export const SLACK_USER_SCOPES = [
   "reactions:read",
   "reactions:write",
   "search:read",
+  "chat:write",
 ] as const;
 
 /** The manifest the "Create Slack app" link prefills. */
@@ -302,6 +303,16 @@ export const SlackState = Schema.Struct({
   authoredPullRequests: Schema.Array(WorkGitHubPullRequest).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** Replies saved to send in a conversation, by the user or drafted by the Work agent. */
+  replyDrafts: Schema.Array(
+    Schema.Struct({
+      channelId: Schema.String,
+      ts: Schema.String,
+      text: Schema.String,
+      by: Schema.Literals(["you", "agent"]),
+      at: Schema.Number,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** Devin's logo, from its Slack profile, for marking its sessions. */
   devinAvatarUrl: Schema.optional(Schema.String),
   devin: DevinConnection.pipe(
@@ -398,6 +409,22 @@ export const SlackSetConversationWaitInput = Schema.Struct({
   ),
 });
 export type SlackSetConversationWaitInput = typeof SlackSetConversationWaitInput.Type;
+
+/** Saves a reply to send later, or clears it with `text: null`. */
+export const SlackSetReplyDraftInput = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  text: Schema.NullOr(Schema.String),
+});
+export type SlackSetReplyDraftInput = typeof SlackSetReplyDraftInput.Type;
+
+/** Posts a reply in the conversation as the user, and clears its draft. */
+export const SlackSendReplyInput = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  text: Schema.String.check(Schema.isMinLength(1)),
+});
+export type SlackSendReplyInput = typeof SlackSendReplyInput.Type;
 
 export const SlackSetChannelExcludedInput = Schema.Struct({
   channelId: Schema.String,

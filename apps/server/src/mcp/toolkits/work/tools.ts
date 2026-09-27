@@ -60,6 +60,8 @@ const WorkItem = Schema.Struct({
       lastReplyBy: Schema.optional(Schema.String),
       owner: Schema.optional(Schema.String),
       waitingOn: Schema.optional(Schema.String),
+      /** A reply saved to send; the user sends it. */
+      draft: Schema.optional(Schema.String),
       followed: Schema.Boolean,
     }),
   ),
@@ -233,6 +235,22 @@ const UpdateConversationTool = Tool.make("update_conversation", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
+const DraftSlackReplyTool = Tool.make("draft_slack_reply", {
+  description: `Save a reply for the user to review and send in a Slack conversation. It is not posted: the user edits and sends it from the Work page. Replaces an earlier draft; pass an empty text to clear it. ${WORK_ACCESS}`,
+  parameters: Schema.Struct({
+    permalink: SlackPermalink,
+    text: Schema.String.annotate({ description: "Slack mrkdwn. Empty clears the draft." }),
+  }),
+  success: Schema.Struct({ saved: Schema.Boolean }),
+  failure: WorkToolError,
+  dependencies,
+})
+  .annotate(Tool.Title, "Draft Slack reply")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
 const StartT3ThreadTool = Tool.make("start_t3_thread", {
   description: `Start a new T3 thread in a project with a first message, to hand a task to another agent. It uses this thread's model, and can be linked to the Slack conversation it is about. Say what you started to the user. ${WORK_ACCESS}`,
   parameters: Schema.Struct({
@@ -269,6 +287,7 @@ export const WorkToolkit = Toolkit.make(
   ReadSlackConversationTool,
   ReadT3ThreadTool,
   UpdateConversationTool,
+  DraftSlackReplyTool,
   StartT3ThreadTool,
   MessageT3ThreadTool,
 );
