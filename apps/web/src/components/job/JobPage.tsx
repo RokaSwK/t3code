@@ -1,12 +1,11 @@
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { BotIcon, EllipsisIcon, MessageCircleIcon, MessageSquareIcon } from "lucide-react";
+import { EllipsisIcon, MessageCircleIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
-import { cn } from "../../lib/utils";
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
@@ -43,7 +42,9 @@ import { WorkDetail, type WorkSelection } from "./WorkDetail";
 import { buildWorkGroups, slackTsToMs, type WorkGroup } from "./workGroups";
 import {
   DEVIN_STATE_PRESENTATION,
+  DevinLogo,
   SlackChannelGlyph,
+  T3Logo,
   slackMessageSummary,
   WORK_META_SEPARATOR,
   WorkGroupHeader,
@@ -75,7 +76,13 @@ function syncLabel(sync: SlackState["sync"]): string {
 }
 
 /** What is working on a conversation, as glyphs after its title. */
-function ConversationSignals({ group }: { readonly group: WorkGroup }) {
+function ConversationSignals({
+  group,
+  devinAvatarUrl,
+}: {
+  readonly group: WorkGroup;
+  readonly devinAvatarUrl: string | undefined;
+}) {
   const conversation = group.conversation!;
   const session = conversation.devin?.sessions.at(-1);
   const devinState = session?.state ? DEVIN_STATE_PRESENTATION[session.state] : null;
@@ -83,14 +90,14 @@ function ConversationSignals({ group }: { readonly group: WorkGroup }) {
   return (
     <>
       {session ? (
-        <BotIcon
-          aria-label={`Devin ${devinState?.label ?? ""}`}
-          className={cn("size-3.5", devinState?.className)}
+        <DevinLogo
+          url={devinAvatarUrl}
+          label={devinState ? `Devin, ${devinState.label}` : "Devin"}
         />
       ) : null}
       {group.threads.length > 0 ? (
         <span className="inline-flex items-center gap-0.5">
-          <MessageSquareIcon aria-label="T3 threads" className="size-3.5" />
+          <T3Logo />
           {group.threads.length > 1 ? group.threads.length : null}
         </span>
       ) : null}
@@ -289,10 +296,12 @@ function selectionFor(list: WorkList, id: string | null): WorkSelection | null {
 
 function ConversationRows({
   groups,
+  devinAvatarUrl,
   selectedId,
   onSelect,
 }: {
   readonly groups: ReadonlyArray<WorkGroup>;
+  readonly devinAvatarUrl: string | undefined;
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
 }) {
@@ -303,7 +312,7 @@ function ConversationRows({
       selected={selectedId === `c:${group.id}`}
       glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
       title={slackMessageSummary(group.conversation!.markdown)}
-      signals={<ConversationSignals group={group} />}
+      signals={<ConversationSignals group={group} devinAvatarUrl={devinAvatarUrl} />}
       meta={<SlackMeta thread={group.conversation!} reason={group.reason} />}
       updatedAt={group.updatedAt}
       onSelect={onSelect}
@@ -517,6 +526,7 @@ export function JobPage() {
                   <section key={label} className="flex flex-col">
                     <WorkGroupHeader label={label} count={groups.length} />
                     <ConversationRows
+                      devinAvatarUrl={state?.devinAvatarUrl}
                       groups={groups}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
@@ -585,6 +595,7 @@ export function JobPage() {
                   />
                   {showDone ? (
                     <ConversationRows
+                      devinAvatarUrl={state?.devinAvatarUrl}
                       groups={list.done}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
@@ -635,6 +646,7 @@ export function JobPage() {
           >
             <WorkDetail
               selection={selection}
+              devinAvatarUrl={state?.devinAvatarUrl}
               environmentId={environmentId}
               projects={projects}
               onClose={closeSelection}

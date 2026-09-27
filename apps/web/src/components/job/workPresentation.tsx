@@ -1,10 +1,11 @@
 import type { DevinSessionState, SlackChannelKind } from "@t3tools/contracts";
-import { HashIcon, LockIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
+import { BotIcon, HashIcon, LockIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
+import { T3Wordmark } from "../T3Wordmark";
 import { Separator } from "../ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { WorkStatus } from "./workGroups";
@@ -95,6 +96,41 @@ export function SlackChannelGlyph({
   return <Icon aria-hidden className={cn("size-3 shrink-0", className)} />;
 }
 
+/** Devin's own logo, from its Slack profile; a robot until Slack has named it. */
+export function DevinLogo({
+  url,
+  label = "Devin",
+  className,
+}: {
+  readonly url: string | undefined;
+  readonly label?: string;
+  readonly className?: string;
+}) {
+  if (!url) return <BotIcon aria-label={label} className={cn("size-3.5 shrink-0", className)} />;
+  return (
+    <img
+      alt={label}
+      src={url}
+      loading="lazy"
+      // Devin's avatar is a dark mark on white; inverted it sits like an icon on dark themes.
+      className={cn("size-3.5 shrink-0 rounded-xs dark:invert", className)}
+    />
+  );
+}
+
+/** The T3 mark, for T3 threads working on a conversation. */
+export function T3Logo({ className }: { readonly className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label="T3 thread"
+      className={cn("inline-flex size-3.5 shrink-0 items-center justify-center", className)}
+    >
+      <T3Wordmark aria-hidden className="h-2 w-auto" />
+    </span>
+  );
+}
+
 /** One line of plain text from a Slack message, for a row title. */
 export function slackMessageSummary(markdown: string): string {
   const text = markdown
@@ -172,8 +208,9 @@ export const WorkRow = memo(function WorkRow({
       <span className="mt-0.5 flex">{glyph}</span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="min-w-0 truncate text-sm">{title}</span>
+          <span className="min-w-0 flex-1 truncate text-sm">{title}</span>
           {signals ? (
+            // Pinned to the row's end, over the time, however short the title is.
             <span className="flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground">
               {signals}
             </span>

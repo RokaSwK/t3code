@@ -241,7 +241,11 @@ const StoredCache = Schema.Struct({
   ),
   devinUser: Schema.optional(
     Schema.NullOr(
-      Schema.Struct({ userId: Schema.String, botId: Schema.optionalKey(Schema.String) }),
+      Schema.Struct({
+        userId: Schema.String,
+        botId: Schema.optionalKey(Schema.String),
+        avatarUrl: Schema.optionalKey(Schema.String),
+      }),
     ),
   ),
   devinSeenTs: Schema.optional(Schema.String),
@@ -462,6 +466,7 @@ const make = Effect.gen(function* () {
   let devinUser: DevinIdentity | null | undefined;
   /** Newest Devin message already seen by search. */
   let devinSeenTs: string | undefined;
+  let devinLookedUp = false;
   let devinSearchedAt = 0;
   let searchScopeMissing = false;
   let devin: StoredDevin | undefined;
@@ -612,6 +617,7 @@ const make = Effect.gen(function* () {
       conversations: connection ? visibleConversations().map(withPullRequestStates) : [],
       dismissed: connection ? dismissed : [],
       excludedChannelIds: connection ? [...excludedChannelIds] : [],
+      ...(connection && devinUser?.avatarUrl ? { devinAvatarUrl: devinUser.avatarUrl } : {}),
       devin: devin
         ? {
             status: "connected",
@@ -1271,7 +1277,11 @@ const make = Effect.gen(function* () {
    * newest message seen last time. Each one is read to learn whether it is yours.
    */
   const searchDevin = Effect.fn("slack.search_devin")(function* () {
-    if (devinUser === undefined) devinUser = yield* lookUpDevin();
+    // Once per run for an identity cached before its logo was kept.
+    if (devinUser === undefined || (devinUser !== null && !devinUser.avatarUrl && !devinLookedUp)) {
+      devinLookedUp = true;
+      devinUser = yield* lookUpDevin();
+    }
     if (devinUser === null) return;
     const now = yield* Clock.currentTimeMillis;
     const query = `from:<@${devinUser.userId}> after:${slackSearchAfterDate(

@@ -7,12 +7,10 @@ import {
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  BotIcon,
   CheckIcon,
   EllipsisIcon,
   ExternalLinkIcon,
   EyeIcon,
-  MessageSquareIcon,
   MessageSquarePlusIcon,
   RotateCcwIcon,
   XIcon,
@@ -36,7 +34,9 @@ import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 import type { WorkGroup, WorkPullRequest, WorkThread } from "./workGroups";
 import {
   DEVIN_STATE_PRESENTATION,
+  DevinLogo,
   SlackChannelGlyph,
+  T3Logo,
   WORK_STATUS_PRESENTATION,
   WorkStatusDot,
 } from "./workPresentation";
@@ -77,7 +77,7 @@ function ThreadRows({ threads }: { readonly threads: ReadonlyArray<WorkThread> }
         })
       }
     >
-      <MessageSquareIcon className="size-4 shrink-0 text-muted-foreground" />
+      <T3Logo className="size-4 text-muted-foreground" />
       <span className="min-w-0 flex-1 truncate">{thread.title}</span>
       <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">
         {formatRelativeTimeLabel(thread.updatedAt)}
@@ -160,7 +160,13 @@ function PullRequestRows({
   );
 }
 
-function DevinRows({ thread }: { readonly thread: SlackThread }) {
+function DevinRows({
+  thread,
+  devinAvatarUrl,
+}: {
+  readonly thread: SlackThread;
+  readonly devinAvatarUrl: string | undefined;
+}) {
   return (thread.devin?.sessions ?? []).map((session) => {
     const state = session.state ? DEVIN_STATE_PRESENTATION[session.state] : null;
     return (
@@ -170,7 +176,7 @@ function DevinRows({ thread }: { readonly thread: SlackThread }) {
         className={LINK_ROW_CLASS}
         onClick={() => openExternal(session.url)}
       >
-        <BotIcon className="size-4 shrink-0 text-muted-foreground" />
+        <DevinLogo url={devinAvatarUrl} className="size-4 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate">{session.title ?? "Devin session"}</span>
         <span className={cn("shrink-0 text-2xs", state?.className ?? "text-muted-foreground")}>
           {state?.label ?? (thread.devin?.stopped ? "asleep" : "Devin")}
@@ -262,6 +268,7 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
 
 function SlackDetail({
   environmentId,
+  devinAvatarUrl,
   thread,
   status,
   group,
@@ -269,6 +276,7 @@ function SlackDetail({
   onClose,
 }: {
   readonly environmentId: EnvironmentId;
+  readonly devinAvatarUrl: string | undefined;
   readonly thread: SlackThread;
   readonly status: ReactNode;
   readonly group: WorkGroup | null;
@@ -357,7 +365,7 @@ function SlackDetail({
           </div>
           {sessions.length > 0 || threads.length > 0 ? (
             <Section title="Working on it">
-              <DevinRows thread={thread} />
+              <DevinRows thread={thread} devinAvatarUrl={devinAvatarUrl} />
               <ThreadRows threads={threads} />
             </Section>
           ) : null}
@@ -436,11 +444,13 @@ function T3WorkDetail({
 /** The selected item in full, beside the list. */
 export function WorkDetail({
   selection,
+  devinAvatarUrl,
   environmentId,
   projects,
   onClose,
 }: {
   readonly selection: WorkSelection;
+  readonly devinAvatarUrl: string | undefined;
   readonly environmentId: EnvironmentId | null;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly onClose: () => void;
@@ -454,6 +464,7 @@ export function WorkDetail({
       <SlackDetail
         key={selection.group.id}
         environmentId={environmentId}
+        devinAvatarUrl={devinAvatarUrl}
         thread={selection.group.conversation!}
         status={<StatusLine group={selection.group} />}
         group={selection.group}
@@ -466,6 +477,7 @@ export function WorkDetail({
     <SlackDetail
       key={`${selection.thread.channelId}:${selection.thread.ts}`}
       environmentId={environmentId}
+      devinAvatarUrl={devinAvatarUrl}
       thread={selection.thread}
       status={
         <>

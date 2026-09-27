@@ -251,6 +251,8 @@ export const SlackState = Schema.Struct({
   excludedChannelIds: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  /** Devin's logo, from its Slack profile, for marking its sessions. */
+  devinAvatarUrl: Schema.optional(Schema.String),
   devin: DevinConnection.pipe(
     Schema.withDecodingDefault(Effect.succeed({ status: "disconnected" as const })),
   ),

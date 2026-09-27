@@ -22,6 +22,7 @@ export const DEVIN_SEARCH_MAX_PAGES = 10;
 export interface DevinIdentity {
   readonly userId: string;
   readonly botId?: string;
+  readonly avatarUrl?: string;
 }
 
 interface SlackApiUserLike {
@@ -30,7 +31,11 @@ interface SlackApiUserLike {
   readonly real_name?: string;
   readonly deleted?: boolean;
   readonly is_bot?: boolean;
-  readonly profile?: { readonly bot_id?: string; readonly api_app_id?: string };
+  readonly profile?: {
+    readonly bot_id?: string;
+    readonly api_app_id?: string;
+    readonly image_48?: string;
+  };
 }
 
 export function findDevinUser(users: ReadonlyArray<SlackApiUserLike>): DevinIdentity | undefined {
@@ -39,7 +44,11 @@ export function findDevinUser(users: ReadonlyArray<SlackApiUserLike>): DevinIden
     bots.find((candidate) => candidate.profile?.api_app_id === DEVIN_SLACK_APP_ID) ??
     bots.find((candidate) => (candidate.real_name ?? candidate.name)?.toLowerCase() === "devin");
   if (!user) return undefined;
-  return { userId: user.id, ...(user.profile?.bot_id ? { botId: user.profile.bot_id } : {}) };
+  return {
+    userId: user.id,
+    ...(user.profile?.bot_id ? { botId: user.profile.bot_id } : {}),
+    ...(user.profile?.image_48 ? { avatarUrl: user.profile.image_48 } : {}),
+  };
 }
 
 export function isDevinMessage(message: SlackApiMessage, devin: DevinIdentity | undefined) {
