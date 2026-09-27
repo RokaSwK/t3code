@@ -135,7 +135,7 @@ import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { getSyntaxHighlighterPromise } from "../lib/syntaxHighlighting";
-import { GitHubIcon } from "./Icons";
+import { GitHubIcon, RevylIcon } from "./Icons";
 import { createIncrementalHighlightedDocument } from "../lib/incrementalHighlighting";
 import { HighlightedCodeLines } from "./chat/HighlightedCodeLines";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
@@ -1300,6 +1300,7 @@ const failedFaviconHosts = new Set<string>();
 function brandLinkIcon(host: string): typeof GitHubIcon | null {
   const hostname = host.toLowerCase();
   if (hostname === "github.com" || hostname.endsWith(".github.com")) return GitHubIcon;
+  if (hostname === "revyl.ai" || hostname.endsWith(".revyl.ai")) return RevylIcon;
   return null;
 }
 

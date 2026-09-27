@@ -111,7 +111,6 @@ import * as ServerConfig from "./config.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as SlackService from "./slack/SlackService.ts";
 import * as AgentSessionSync from "./project/AgentSessionSync.ts";
-import * as RevylService from "./revyl/RevylService.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
 import {
   isThreadDetailEvent,
@@ -849,7 +848,6 @@ const buildAppUnderTest = (options?: {
           }),
           Layer.mock(SlackService.SlackService)({}),
           Layer.mock(AgentSessionSync.AgentSessionSync)({}),
-          Layer.mock(RevylService.RevylService)({}),
         ),
       ),
       Layer.provide(

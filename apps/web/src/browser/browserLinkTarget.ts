@@ -31,10 +31,22 @@ export interface ResolveLinkTargetInput {
  */
 export function resolveLinkTarget(input: ResolveLinkTargetInput): BrowserLinkTarget {
   if (input.event.metaKey || input.event.ctrlKey) return "system";
-  if (input.preference !== "app") return "system";
+  if (input.preference !== "app" && !opensInAppByDefault(input.url)) return "system";
   if (!input.canOpenInApp) return "system";
   if (!isWebUrl(input.url)) return "system";
   return "app";
+}
+
+/**
+ * Sites that belong beside the thread whatever the preference: a Revyl device viewer is
+ * something to watch while the agent works, and the in-app browser keeps its sign-in.
+ */
+export function opensInAppByDefault(url: string): boolean {
+  try {
+    return new URL(url).hostname.toLowerCase() === "app.revyl.ai";
+  } catch {
+    return false;
+  }
 }
 
 /**

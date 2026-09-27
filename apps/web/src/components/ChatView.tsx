@@ -216,7 +216,6 @@ import { PullRequestDetailPanel } from "./pullRequest/PullRequestDetailPanel";
 import { PullRequestDetailGhost } from "./pullRequest/PullRequestGhosts";
 import { PullRequestsUnavailableState } from "./pullRequest/PullRequestsUnavailableState";
 import { ThreadSlackPanel } from "./job/ThreadSlackPanel";
-import { RevylPanel } from "./revyl/RevylPanel";
 import { RightPanelTabs } from "./RightPanelTabs";
 import { AgentsPanel } from "./AgentsPanel";
 import { LinkPullRequestDialogHost } from "./pullRequest/LinkPullRequestDialog";
@@ -4594,10 +4593,6 @@ export default function ChatView(props: ChatViewProps) {
   const addSlackSurface = useCallback(() => {
     if (activeThreadRef && isServerThread)
       useRightPanelStore.getState().open(activeThreadRef, "slack");
-  }, [activeThreadRef, isServerThread]);
-  const addRevylSurface = useCallback(() => {
-    if (activeThreadRef && isServerThread)
-      useRightPanelStore.getState().open(activeThreadRef, "revyl");
   }, [activeThreadRef, isServerThread]);
   const addAgentsSurface = useCallback(() => {
     if (!activeThreadRef) return;
@@ -9673,12 +9668,6 @@ export default function ChatView(props: ChatViewProps) {
         key={`${activeThreadRef.environmentId}:${activeThreadRef.threadId}`}
         threadRef={activeThreadRef}
       />
-    ) : renderedRightPanelSurface?.kind === "revyl" && activeThreadRef ? (
-      <RevylPanel
-        mode="embedded"
-        environmentId={activeThreadRef.environmentId}
-        visible={rightPanelOpen}
-      />
     ) : renderedRightPanelSurface?.kind === "agents" ? (
       <AgentsPanel
         model={agentPanelModel}
@@ -10340,7 +10329,6 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequest={addPullRequestSurface}
           onAddPullRequests={addPullRequestsSurface}
           onAddSlack={addSlackSurface}
-          onAddRevyl={isServerThread ? addRevylSurface : undefined}
           slackAvailable={
             isServerThread && serverConfig?.environment.capabilities.threadSlackLinks === true
           }
@@ -10402,7 +10390,6 @@ export default function ChatView(props: ChatViewProps) {
             onAddPullRequest={addPullRequestSurface}
             onAddPullRequests={addPullRequestsSurface}
             onAddSlack={addSlackSurface}
-            onAddRevyl={isServerThread ? addRevylSurface : undefined}
             slackAvailable={
               isServerThread && serverConfig?.environment.capabilities.threadSlackLinks === true
             }

@@ -119,12 +119,7 @@ To receive newer tool versions on a remote environment, update that environment'
 
 ## Revyl cloud devices
 
-To use a Revyl cloud iPhone or Android device, choose **Revyl** from the right panel's **+**
-menu. It uses the Revyl CLI on the machine running T3 Code, so install it and run
-`revyl auth login` there first. Start a device from the panel, or open one an agent started
-with `revyl device start`; every active session on your Revyl account shows up.
-
-The screen plays live. Click to tap, hold to long-press, drag to swipe, and type while the
-screen is focused. **Home**, and **Back** on Android, are below the screen. Each action takes
-about a second to reach the device. The stop button releases the device, which ends its
-billing; Revyl also stops an idle device on its own.
+On desktop, Revyl links (`app.revyl.ai`) open in the Browser panel beside the thread, whatever
+**Open links in** is set to; ⌘-click opens them in your system browser instead. The first time,
+sign in to Revyl there; the Browser panel's default profile remembers it. Agents that start a
+Revyl device with the Revyl CLI can open its viewer in the Browser panel for you.

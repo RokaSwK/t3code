@@ -127,7 +127,6 @@ import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import * as SlackService from "./slack/SlackService.ts";
 import * as AgentSessionSync from "./project/AgentSessionSync.ts";
-import * as RevylService from "./revyl/RevylService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
 import { issueAssetUrl } from "./assets/AssetAccess.ts";
@@ -633,7 +632,6 @@ const makeWsRpcLayer = (
       >();
       const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
       const agentSessionSync = yield* AgentSessionSync.AgentSessionSync;
-      const revyl = yield* RevylService.RevylService;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
@@ -3677,18 +3675,6 @@ const makeWsRpcLayer = (
         [WS_METHODS.devinDisconnect]: (_input) =>
           observeRpcEffect(WS_METHODS.devinDisconnect, slackService.devinDisconnect, {
             "rpc.aggregate": "slack",
-          }),
-        [WS_METHODS.revylState]: (_input) =>
-          observeRpcEffect(WS_METHODS.revylState, revyl.state, { "rpc.aggregate": "revyl" }),
-        [WS_METHODS.revylStart]: (input) =>
-          observeRpcEffect(WS_METHODS.revylStart, revyl.start(input), {
-            "rpc.aggregate": "revyl",
-          }),
-        [WS_METHODS.revylStop]: (input) =>
-          observeRpcEffect(WS_METHODS.revylStop, revyl.stop(input), { "rpc.aggregate": "revyl" }),
-        [WS_METHODS.revylInput]: (input) =>
-          observeRpcEffect(WS_METHODS.revylInput, revyl.input(input), {
-            "rpc.aggregate": "revyl",
           }),
         [WS_METHODS.subscribeSlackState]: (_input) =>
           observeRpcStream(WS_METHODS.subscribeSlackState, slackService.state, {

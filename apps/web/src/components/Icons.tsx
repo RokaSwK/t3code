@@ -74,6 +74,15 @@ export const GitHubIcon: Icon = (props) => (
   </svg>
 );
 
+/** Revyl's mark without its tile, in `currentColor`. */
+export const RevylIcon: Icon = (props) => (
+  <svg {...props} viewBox="64 101 384 310" fill="currentColor">
+    <path d="M219 117 80 256l139 139 37-37-102-102 102-102z" />
+    <path d="m293 117 139 139-139 139-37-37 102-102-102-102z" />
+    <path d="m256 191 65 65-65 65-65-65z" />
+  </svg>
+);
+
 export const GitIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 256 256">
     <path

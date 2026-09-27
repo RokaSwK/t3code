@@ -37,6 +37,24 @@ describe("resolveLinkTarget", () => {
     ).toBe("app");
   });
 
+  it("opens Revyl device viewers in-app whatever the preference, unless modified", () => {
+    const url = "https://app.revyl.ai/sessions/b3dc52d4";
+    expect(resolveLinkTarget({ url, event: click, preference: "system", canOpenInApp: true })).toBe(
+      "app",
+    );
+    expect(
+      resolveLinkTarget({
+        url,
+        event: { metaKey: true, ctrlKey: false },
+        preference: "system",
+        canOpenInApp: true,
+      }),
+    ).toBe("system");
+    expect(
+      resolveLinkTarget({ url, event: click, preference: "system", canOpenInApp: false }),
+    ).toBe("system");
+  });
+
   it("falls back to the system browser where there is no in-app browser", () => {
     // The hosted web app and mobile have nowhere to open a tab, so the
     // preference cannot be honoured there and the link still has to open.
