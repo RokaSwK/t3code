@@ -47,11 +47,11 @@ export async function playWhep(input: {
     if (resource) void fetch(resource, { method: "DELETE" }).catch(() => undefined);
   };
   try {
+    // Video only: an audio track arriving second would replace the picture on the element.
     connection.addTransceiver("video", { direction: "recvonly" });
-    connection.addTransceiver("audio", { direction: "recvonly" });
     connection.addEventListener("track", (event) => {
-      const [stream] = event.streams;
-      input.video.srcObject = stream ?? new MediaStream([event.track]);
+      if (event.track.kind !== "video") return;
+      input.video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
     });
     connection.addEventListener("connectionstatechange", () =>
       input.onState(connection.connectionState),
