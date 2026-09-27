@@ -9,6 +9,9 @@ Connect Slack, and optionally Devin, in **Settings → Work**.
 
 ## Your work
 
+The page lists your conversations grouped by what they need, newest first. Select one to read
+it beside the list, with the Devin sessions, T3 threads, and pull requests working on it.
+
 **Needs me** is where to start. A conversation needs you when someone else replied last, an
 agent is waiting on you (a T3 approval, question, plan, or error, or a Devin session waiting for
 input), a pull request has failing checks, a merge conflict, or requested changes, or Devin
@@ -16,18 +19,19 @@ replied or finished and you have not looked yet. **In progress** means an agent 
 PR is open. **Waiting** means you replied last or a PR is waiting on checks or review.
 
 A conversation is **Done** when anyone reacts to it with a tick (✅, ✔️, or ☑️), when every PR
-it links to is merged or closed, or after three quiet days when you or Devin had the last word.
-Choose **Done** to mark any other conversation yourself; a new reply from someone else brings it
-back. **Not done** undoes your own mark.
+it links to is merged or closed, or after three quiet days when you or Devin had the last word or
+nobody replied. Choose **Done** to mark any other conversation yourself; a new reply from someone
+else brings it back. **Not done** undoes your own mark.
 
 Choose **Start thread** to work on a conversation in T3. The new thread opens as a draft already
 linked to the Slack conversation, so it shows on the conversation here, and the **Slack threads**
-panel opens the conversation beside your work. **Unfollow** removes your 👀 reactions.
+panel opens the conversation beside your work. **Unfollow** in the **…** menu removes your 👀
+reactions.
 
-T3 work that is not tied to one of your conversations is under **Show other work**. Use
-**Folders** to choose which project folders it comes from; this choice is saved on each connected
-server. Link a PR from a T3 thread using **Link pull request** in the command palette; created
-PRs link automatically. PR status includes the time it last synced.
+T3 work that is not tied to one of your conversations is under **Other work**. Choose **Choose
+folders…** from the page's **…** menu to pick which project folders it comes from; this choice is
+saved on each connected server. Link a PR from a T3 thread using **Link pull request** in the
+command palette; created PRs link automatically.
 
 Choose **Review with agent** to open a new T3 draft with the current work snapshot. Review and
 send the prompt when you want a triage report. The agent is asked to investigate, identify
@@ -49,13 +53,14 @@ Finding Devin threads uses Slack search. If you connected Slack before this was 
 ## New in your channels
 
 Below your work, T3 Code lists conversations started in the last day in your public channels,
-private channels, and group messages, newest first. Choose **Follow** to make one yours, **Start
-thread** to follow it and start work, or **Done** to clear it. Expand a thread to read its
-replies, and add or remove reactions from T3 Code. Direct messages are not included.
+private channels, and group messages, newest first. Select one to read it, then choose **Follow**
+to make it yours, **Start thread** to follow it and start work, or **Done** to clear it. Cleared
+threads are one click away under **Show cleared**. Direct messages are not included.
 
 Busy channels are checked every 30 seconds and quiet ones less often, within Slack's rate limits.
-If Slack asks T3 Code to slow down, the page shows when checking resumes. Use **Channels** to
-exclude channels from this list; conversations you follow in them still appear in your work.
+If Slack asks T3 Code to slow down, the page shows when checking resumes. Use **Choose channels…**
+in the **…** menu to exclude channels from this list; conversations you follow in them still
+appear in your work.
 
 ## Connect Slack
 

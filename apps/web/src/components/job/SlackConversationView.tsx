@@ -1,35 +1,18 @@
-import type {
-  EnvironmentId,
-  SlackMessage,
-  SlackPullRequest,
-  SlackReaction,
-  SlackThread,
-} from "@t3tools/contracts";
-import {
-  ExternalLinkIcon,
-  HashIcon,
-  LockIcon,
-  MessageCircleIcon,
-  SmilePlusIcon,
-  UsersIcon,
-} from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { EnvironmentId, SlackMessage, SlackReaction, SlackThread } from "@t3tools/contracts";
+import { SmilePlusIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { cn } from "~/lib/utils";
-import { readLocalApi } from "~/localApi";
 import { slackEnvironment } from "~/state/slack";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import ChatMarkdown from "../ChatMarkdown";
-import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
-import { Badge } from "../ui/badge";
-import { Button, InlineButton } from "../ui/button";
+import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { slackThreadDoneReason } from "./slackInbox";
 
 const PILL_CLASS =
   "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
@@ -48,10 +31,6 @@ const QUICK_REACTIONS: ReadonlyArray<readonly [name: string, emoji: string]> = [
 
 function slackTsIso(ts: string): string {
   return new Date(Number.parseFloat(ts) * 1000).toISOString();
-}
-
-function openExternal(url: string) {
-  void readLocalApi()?.shell.openExternal(url);
 }
 
 function ReactionGlyph({ reaction }: { readonly reaction: SlackReaction }) {
@@ -186,77 +165,29 @@ export function SlackMessageBody({
   );
 }
 
-const PULL_REQUEST_STATUS = {
-  open: { label: "Open", Icon: PullRequestGlyph.pullRequest },
-  merged: { label: "Merged", Icon: PullRequestGlyph.merged },
-  closed: { label: "Closed", Icon: PullRequestGlyph.closed },
-} as const;
-
-/** The PRs a thread links to, with the state GitHub last reported. */
-function SlackPullRequests({ requests }: { readonly requests: ReadonlyArray<SlackPullRequest> }) {
-  return (
-    <div className="flex min-w-0 flex-wrap gap-2 ps-11">
-      {requests.map((request) => {
-        const status = request.state ? PULL_REQUEST_STATUS[request.state] : null;
-        const Icon = status?.Icon ?? PullRequestGlyph.pullRequest;
-        return (
-          <InlineButton
-            key={request.url}
-            tone="muted"
-            className="max-w-full"
-            onClick={() => openExternal(request.url)}
-          >
-            <Icon />
-            <span className="truncate">
-              {request.repository}#{request.number}
-            </span>
-            {status ? <span>· {status.label}</span> : null}
-          </InlineButton>
-        );
-      })}
-    </div>
-  );
-}
-
 type RepliesState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly messages: ReadonlyArray<SlackMessage> }
   | { readonly status: "error" };
 
-function ChannelGlyph({ kind }: { readonly kind: SlackThread["channelKind"] }) {
-  const Icon =
-    kind === "private"
-      ? LockIcon
-      : kind === "group"
-        ? UsersIcon
-        : kind === "dm"
-          ? MessageCircleIcon
-          : HashIcon;
-  return <Icon aria-hidden className="size-3" />;
-}
-
-/** A Slack thread in the feed, with its replies loaded on demand. */
-export const SlackThreadItem = memo(function SlackThreadItem({
+/**
+ * A Slack conversation read in full: the root message and its replies, which reload whenever
+ * the feed reports a newer reply. Reactions can be toggled on any message.
+ */
+export function SlackConversationView({
   environmentId,
   thread,
-  badge,
-  footer,
 }: {
   readonly environmentId: EnvironmentId;
   readonly thread: SlackThread;
-  /** Replaces the done badge, for pages that say more about where the thread stands. */
-  readonly badge?: ReactNode;
-  /** Actions that belong to this thread on the page it is shown on. */
-  readonly footer?: ReactNode;
 }) {
   const setReaction = useAtomCommand(slackEnvironment.setReaction, { reportFailure: false });
   const getReplies = useAtomCommand(slackEnvironment.getReplies, { reportFailure: false });
-  const [repliesOpen, setRepliesOpen] = useState(false);
   const [replies, setReplies] = useState<RepliesState>({ status: "loading" });
-
   const [reloads, setReloads] = useState(0);
-  // A new request whenever the feed reports a newer reply or a reply's reactions change, so an
-  // open thread follows along.
+  const hasReplies = thread.replyCount > 0;
+  // A new request whenever the feed reports a newer reply or a reply's reactions change, so
+  // the open conversation follows along.
   const repliesRequest = useMemo(
     () => ({
       channelId: thread.channelId,
@@ -267,7 +198,7 @@ export const SlackThreadItem = memo(function SlackThreadItem({
     [thread.channelId, thread.ts, thread.latestReplyTs, reloads],
   );
   useEffect(() => {
-    if (!repliesOpen) return;
+    if (!hasReplies) return;
     let cancelled = false;
     void getReplies({
       environmentId,
@@ -283,10 +214,10 @@ export const SlackThreadItem = memo(function SlackThreadItem({
     return () => {
       cancelled = true;
     };
-  }, [environmentId, getReplies, repliesOpen, repliesRequest]);
+  }, [environmentId, getReplies, hasReplies, repliesRequest]);
 
   const toggleReaction = useCallback(
-    async (ts: string, name: string, reacted: boolean, isReply: boolean) => {
+    async (ts: string, name: string, reacted: boolean) => {
       const result = await setReaction({
         environmentId,
         input: { channelId: thread.channelId, ts, name, reacted },
@@ -295,80 +226,34 @@ export const SlackThreadItem = memo(function SlackThreadItem({
         toastManager.add({ type: "error", title: "The reaction could not be saved" });
         return;
       }
-      if (isReply) setReloads((count) => count + 1);
+      if (ts !== thread.ts) setReloads((count) => count + 1);
     },
-    [environmentId, setReaction, thread.channelId],
+    [environmentId, setReaction, thread.channelId, thread.ts],
   );
-
-  const doneReason = slackThreadDoneReason(thread);
 
   return (
-    <article className="flex flex-col gap-3 rounded-xl border bg-card p-4 text-card-foreground">
-      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <span className="inline-flex min-w-0 items-center gap-1">
-          <ChannelGlyph kind={thread.channelKind} />
-          <span className="truncate">{thread.channelName}</span>
-        </span>
-        {badge !== undefined ? (
-          badge
-        ) : doneReason ? (
-          <Badge variant="success" size="sm">
-            {doneReason}
-          </Badge>
-        ) : null}
-        <InlineButton
-          tone="muted"
-          className="ms-auto shrink-0"
-          onClick={() => openExternal(thread.permalink)}
-        >
-          Open in Slack
-          <ExternalLinkIcon />
-        </InlineButton>
-      </div>
+    <div className="flex flex-col gap-4">
       <SlackMessageBody
         message={thread}
-        onToggleReaction={(name, reacted) => void toggleReaction(thread.ts, name, reacted, false)}
+        onToggleReaction={(name, reacted) => void toggleReaction(thread.ts, name, reacted)}
       />
-      {thread.pullRequests ? <SlackPullRequests requests={thread.pullRequests} /> : null}
-      {thread.replyCount > 0 ? (
-        <div className="flex flex-col gap-3 ps-11">
-          <InlineButton
-            tone="muted"
-            className="self-start"
-            onClick={() => {
-              if (!repliesOpen) setReplies({ status: "loading" });
-              setRepliesOpen(!repliesOpen);
-            }}
-          >
-            {repliesOpen
-              ? "Hide replies"
-              : thread.replyCount === 1
-                ? "1 reply"
-                : `${thread.replyCount} replies`}
-            {thread.latestReplyTs && !repliesOpen
-              ? `, last ${formatRelativeTimeLabel(slackTsIso(thread.latestReplyTs))}`
-              : ""}
-          </InlineButton>
-          {repliesOpen ? (
-            replies.status === "loading" ? (
-              <Spinner className="size-4" />
-            ) : replies.status === "error" ? (
-              <p className="text-xs text-destructive">Replies could not be loaded.</p>
-            ) : (
-              replies.messages.map((reply) => (
-                <SlackMessageBody
-                  key={reply.ts}
-                  message={reply}
-                  onToggleReaction={(name, reacted) =>
-                    void toggleReaction(reply.ts, name, reacted, true)
-                  }
-                />
-              ))
-            )
-          ) : null}
+      {hasReplies ? (
+        <div className="flex flex-col gap-4 border-l border-border/70 ps-4">
+          {replies.status === "loading" ? (
+            <Spinner className="size-4" />
+          ) : replies.status === "error" ? (
+            <p className="text-xs text-destructive">Replies could not be loaded.</p>
+          ) : (
+            replies.messages.map((reply) => (
+              <SlackMessageBody
+                key={reply.ts}
+                message={reply}
+                onToggleReaction={(name, reacted) => void toggleReaction(reply.ts, name, reacted)}
+              />
+            ))
+          )}
         </div>
       ) : null}
-      {footer}
-    </article>
+    </div>
   );
-});
+}

@@ -208,7 +208,12 @@ function conversationStatusOf(
   const lastReply = conversation.lastReply;
   if (lastReply?.by === "other")
     return { status: "needs", reason: `${lastReply.authorName} replied` };
-  if (!lastReply && !conversation.startedByMe) return { status: "needs", reason: "No reply yet" };
+  const quiet = now - lastActivityMs(conversation, threads) > WORK_QUIET_MS;
+  if (!lastReply && !conversation.startedByMe) {
+    return quiet
+      ? { status: "done", reason: "Quiet for 3 days" }
+      : { status: "needs", reason: "No reply yet" };
+  }
   if (agentWorking(threads)) return { status: "working", reason: "Agent working" };
   const lastDevinMs = conversation.devin ? slackTsToMs(conversation.devin.lastMessageTs) : 0;
   const devinWorking =
@@ -236,7 +241,6 @@ function conversationStatusOf(
   }
   const waiting = pullRequestWaiting(pullRequests);
   if (waiting) return waiting;
-  const quiet = now - lastActivityMs(conversation, threads) > WORK_QUIET_MS;
   if (lastReply?.by === "devin") {
     if (quiet) return { status: "done", reason: "Quiet for 3 days" };
     return {

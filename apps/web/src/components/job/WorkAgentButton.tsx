@@ -42,7 +42,7 @@ export function WorkAgentButton({
     setPending(false);
   };
   return (
-    <Button size="xs" variant="outline" disabled={!root || pending} onClick={() => void start()}>
+    <Button size="xs" variant="ghost" disabled={!root || pending} onClick={() => void start()}>
       <SparklesIcon />
       Review with agent
     </Button>

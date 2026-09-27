@@ -16,7 +16,7 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { SlackMessageBody } from "./SlackThreadItem";
+import { SlackMessageBody } from "./SlackConversationView";
 
 function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url: string }) {
   const connected = useEnvironment(threadRef.environmentId)?.connection.phase === "connected";

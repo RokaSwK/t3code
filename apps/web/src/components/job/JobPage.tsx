@@ -1,19 +1,23 @@
-import {
-  type EnvironmentId,
-  SLACK_FOLLOW_REACTION,
-  type SlackState,
-  type SlackThread,
-} from "@t3tools/contracts";
-import { useNavigate } from "@tanstack/react-router";
-import { CheckIcon, EllipsisIcon, EyeIcon, MessageSquarePlusIcon } from "lucide-react";
-import { useState } from "react";
+import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { BotIcon, EllipsisIcon, MessageCircleIcon, MessageSquareIcon } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
+import { cn } from "../../lib/utils";
+import {
+  useAllEnvironmentShellsBootstrapped,
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+} from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { slackEnvironment, useSlackState } from "../../state/slack";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
+import { PullRequestStateGlyph } from "../pullRequest/pullRequestPresentation";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -24,23 +28,40 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { RefreshIcon } from "../ui/refresh-icon";
-import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
 import { toastManager } from "../ui/toast";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { ChannelExclusionsDialog } from "./ChannelExclusionsDialog";
 import { slackThreadDoneReason } from "./slackInbox";
-import { SlackThreadItem } from "./SlackThreadItem";
-import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
-import { WorkOverview } from "./WorkOverview";
+import { WorkAgentButton } from "./WorkAgentButton";
+import { WorkDetail, type WorkSelection } from "./WorkDetail";
+import { buildWorkGroups, slackTsToMs, type WorkGroup } from "./workGroups";
+import {
+  DEVIN_STATE_PRESENTATION,
+  SlackChannelGlyph,
+  slackMessageSummary,
+  WORK_META_SEPARATOR,
+  WorkGroupHeader,
+  WorkRow,
+  WorkRowAuthor,
+  WorkStatusDot,
+} from "./workPresentation";
+import { includedWorkProjects, workRootsForEnvironment } from "./workScope";
+import { WorkScopeDialog } from "./WorkScopeDialog";
+
+/** New threads are for skimming; the rest of the feed is one click away. */
+const NEW_PREVIEW = 8;
+
+const slackIso = (ts: string) => new Date(slackTsToMs(ts)).toISOString();
 
 function syncLabel(sync: SlackState["sync"]): string {
   if (sync.rateLimitedUntil) {
-    return `Slack asked us to slow down; resuming ${new Date(sync.rateLimitedUntil).toLocaleTimeString()}`;
+    return `Slack asked us to slow down until ${new Date(sync.rateLimitedUntil).toLocaleTimeString()}`;
   }
   if (sync.channelCount === 0) {
     return sync.availableChannelCount > 0 ? "All channels excluded" : "Finding your channels…";
@@ -49,60 +70,100 @@ function syncLabel(sync: SlackState["sync"]): string {
     return `Reading channels ${sync.syncedChannelCount} of ${sync.channelCount}…`;
   }
   return sync.lastSyncedAt
-    ? `${sync.channelCount} channels, updated ${formatRelativeTimeLabel(sync.lastSyncedAt)}`
+    ? `${sync.channelCount} channels · ${formatRelativeTimeLabel(sync.lastSyncedAt)}`
     : `${sync.channelCount} channels`;
 }
 
-function JobHeaderActions({
-  environmentId,
-  state,
-  onManageChannels,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly state: SlackState;
-  readonly onManageChannels: () => void;
-}) {
-  const navigate = useNavigate();
-  const refresh = useAtomCommand(slackEnvironment.refresh);
-  const resetInbox = useAtomCommand(slackEnvironment.resetInbox, { reportFailure: false });
-  const [refreshing, setRefreshing] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  if (state.connection.status !== "connected") return null;
+/** What is working on a conversation, as glyphs after its title. */
+function ConversationSignals({ group }: { readonly group: WorkGroup }) {
+  const conversation = group.conversation!;
+  const session = conversation.devin?.sessions.at(-1);
+  const devinState = session?.state ? DEVIN_STATE_PRESENTATION[session.state] : null;
+  const pullRequest = conversation.pullRequests?.[0];
   return (
     <>
-      <div className="ms-auto flex min-w-0 items-center gap-1">
-        <span className="hidden min-w-0 truncate text-xs text-muted-foreground md:block">
-          {state.connection.teamName} as {state.connection.userName}
+      {session ? (
+        <BotIcon
+          aria-label={`Devin ${devinState?.label ?? ""}`}
+          className={cn("size-3.5", devinState?.className)}
+        />
+      ) : null}
+      {group.threads.length > 0 ? (
+        <span className="inline-flex items-center gap-0.5">
+          <MessageSquareIcon aria-label="T3 threads" className="size-3.5" />
+          {group.threads.length > 1 ? group.threads.length : null}
         </span>
-        <Button
-          aria-label="Check Slack now"
-          aria-busy={refreshing}
-          disabled={refreshing}
-          size="icon-sm"
-          variant="ghost"
-          onClick={() => {
-            setRefreshing(true);
-            void refresh({ environmentId, input: {} }).finally(() => setRefreshing(false));
-          }}
-        >
-          <RefreshIcon size="sm" refreshing={refreshing} />
-        </Button>
-        <Menu>
-          <MenuTrigger
-            render={<Button aria-label="Slack options" size="icon-sm" variant="ghost" />}
-          >
-            <EllipsisIcon />
-          </MenuTrigger>
-          <MenuPopup align="end">
-            <MenuItem onClick={onManageChannels}>Choose channels…</MenuItem>
-            <MenuItem onClick={() => setConfirmReset(true)}>Reset Slack inbox</MenuItem>
-            <MenuItem onClick={() => void navigate({ to: "/settings/work" })}>
-              Slack and Devin settings
-            </MenuItem>
-          </MenuPopup>
-        </Menu>
-      </div>
+      ) : null}
+      {pullRequest ? (
+        <PullRequestStateGlyph
+          state={pullRequest.state ?? "open"}
+          isDraft={false}
+          className="size-3.5"
+        />
+      ) : null}
+    </>
+  );
+}
+
+function SlackMeta({ thread, reason }: { readonly thread: SlackThread; readonly reason?: string }) {
+  return (
+    <>
+      <span className="inline-flex min-w-0 max-w-40 shrink items-center gap-1">
+        <SlackChannelGlyph kind={thread.channelKind} />
+        <span className="truncate">{thread.channelName}</span>
+      </span>
+      {/* A direct message is named after the person, so the author would repeat it. */}
+      {thread.channelKind === "dm" && thread.authorName === thread.channelName ? null : (
+        <>
+          {WORK_META_SEPARATOR}
+          <WorkRowAuthor name={thread.authorName} avatarUrl={thread.authorAvatarUrl} />
+        </>
+      )}
+      {reason ? (
+        <>
+          {WORK_META_SEPARATOR}
+          <span className="min-w-0 truncate">{reason}</span>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function JobHeaderMenu({
+  environmentId,
+  slackConnected,
+  onManageChannels,
+  onChooseFolders,
+}: {
+  readonly environmentId: EnvironmentId | null;
+  readonly slackConnected: boolean;
+  readonly onManageChannels: () => void;
+  readonly onChooseFolders: () => void;
+}) {
+  const navigate = useNavigate();
+  const resetInbox = useAtomCommand(slackEnvironment.resetInbox, { reportFailure: false });
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  return (
+    <>
+      <Menu>
+        <MenuTrigger render={<Button aria-label="Work options" size="icon-sm" variant="ghost" />}>
+          <EllipsisIcon />
+        </MenuTrigger>
+        <MenuPopup align="end">
+          <MenuItem onClick={onChooseFolders}>Choose folders…</MenuItem>
+          {slackConnected ? (
+            <>
+              <MenuItem onClick={onManageChannels}>Choose channels…</MenuItem>
+              <MenuItem onClick={() => setConfirmReset(true)}>Reset Slack inbox…</MenuItem>
+            </>
+          ) : null}
+          <MenuSeparator />
+          <MenuItem onClick={() => void navigate({ to: "/settings/work" })}>
+            Slack and Devin settings
+          </MenuItem>
+        </MenuPopup>
+      </Menu>
       <AlertDialog open={confirmReset} onOpenChange={setConfirmReset}>
         <AlertDialogPopup>
           <AlertDialogHeader>
@@ -117,8 +178,9 @@ function JobHeaderActions({
             <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
             <Button
               variant="destructive"
-              disabled={resetting}
+              disabled={resetting || environmentId === null}
               onClick={() => {
+                if (environmentId === null) return;
                 setResetting(true);
                 void resetInbox({ environmentId, input: {} }).then((result) => {
                   setResetting(false);
@@ -139,237 +201,448 @@ function JobHeaderActions({
   );
 }
 
-/** Follow, start work from, or clear a new thread. */
-function NewThreadActions({
-  environmentId,
-  thread,
-  busy,
-  onDone,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly thread: SlackThread;
-  readonly busy: boolean;
-  readonly onDone: () => void;
-}) {
-  const setReaction = useAtomCommand(slackEnvironment.setReaction, { reportFailure: false });
-  const [picking, setPicking] = useState(false);
-  const follow = () =>
-    void setReaction({
-      environmentId,
-      input: {
-        channelId: thread.channelId,
-        ts: thread.ts,
-        name: SLACK_FOLLOW_REACTION,
-        reacted: true,
-      },
-    }).then((result) => {
-      if (result._tag === "Failure") {
-        toastManager.add({ type: "error", title: "Could not follow thread" });
-      }
-    });
-  return (
-    <div className="flex flex-wrap items-center gap-2 ps-11">
-      <Button size="xs" variant="outline" onClick={follow}>
-        <EyeIcon />
-        Follow
-      </Button>
-      <Button
-        size="xs"
-        variant="ghost"
-        onClick={() => {
-          // Work started from a thread makes it yours, so it moves up into Your work.
-          follow();
-          setPicking(true);
-        }}
-      >
-        <MessageSquarePlusIcon />
-        Start thread
-      </Button>
-      <Button size="xs" variant="ghost" disabled={busy} onClick={onDone}>
-        <CheckIcon />
-        Done
-      </Button>
-      {picking ? (
-        <StartThreadFromSlackDialog
-          environmentId={environmentId}
-          thread={thread}
-          onOpenChange={setPicking}
-        />
-      ) : null}
-    </div>
+/** Groups of rows by status, then new threads to triage, then everything settled. */
+function useWorkList(slackState: SlackState | null) {
+  const shells = useThreadShells();
+  const projects = useProjects();
+  const configs = useServerConfigs();
+  const connection = slackState?.connection;
+  const slackConnected =
+    connection?.status === "connected" ||
+    (connection?.status === "authorizing" && connection.connectedAs !== undefined);
+  const conversations = slackConnected ? slackState!.conversations : undefined;
+  const dismissed = slackState?.dismissed;
+  const groups = useMemo(
+    () =>
+      buildWorkGroups(shells, {
+        ...(conversations ? { conversations } : {}),
+        ...(dismissed ? { dismissed } : {}),
+      }),
+    [shells, conversations, dismissed],
   );
+  const includedProjects = useMemo(
+    () => includedWorkProjects(projects, configs),
+    [projects, configs],
+  );
+  return useMemo(() => {
+    const byRecent = (left: WorkGroup, right: WorkGroup) =>
+      right.updatedAt.localeCompare(left.updatedAt);
+    const mine = groups.filter((group) => group.conversation !== null).toSorted(byRecent);
+    const included = new Set(
+      includedProjects.map((project) => `${project.environmentId}:${project.id}`),
+    );
+    const other = groups
+      .filter(
+        (group) =>
+          group.conversation === null &&
+          group.threads.some((thread) =>
+            included.has(`${thread.environmentId}:${thread.projectId}`),
+          ),
+      )
+      .toSorted(byRecent);
+    const mineKeys = new Set(mine.map((group) => group.id));
+    const dismissedKeys = new Set(
+      (slackState?.dismissed ?? []).map((thread) => `${thread.channelId}:${thread.ts}`),
+    );
+    const fresh: SlackThread[] = [];
+    const cleared: SlackThread[] = [];
+    for (const thread of slackConnected ? slackState!.threads : []) {
+      const key = `${thread.channelId}:${thread.ts}`;
+      // A thread that became yours is listed with your work, not twice.
+      if (mineKeys.has(`slack:${key}`)) continue;
+      if (dismissedKeys.has(key) || slackThreadDoneReason(thread) !== null) cleared.push(thread);
+      else fresh.push(thread);
+    }
+    return {
+      slackConnected,
+      includedProjects,
+      needs: mine.filter((group) => group.status === "needs"),
+      working: mine.filter((group) => group.status === "working"),
+      waiting: mine.filter((group) => group.status === "waiting"),
+      done: mine.filter((group) => group.status === "done"),
+      fresh,
+      cleared,
+      other,
+      all: [...mine, ...other],
+    };
+  }, [groups, includedProjects, slackConnected, slackState]);
 }
 
-/** New threads in your channels that are not yours yet. */
-function NewThreadsFeed({
-  environmentId,
-  state,
-  onManageChannels,
+type WorkList = ReturnType<typeof useWorkList>;
+
+function selectionFor(list: WorkList, id: string | null): WorkSelection | null {
+  if (id === null) return null;
+  if (id.startsWith("c:")) {
+    const group = list.all.find((candidate) => `c:${candidate.id}` === id);
+    return group ? { kind: "conversation", group } : null;
+  }
+  if (id.startsWith("w:")) {
+    const group = list.other.find((candidate) => `w:${candidate.id}` === id);
+    return group ? { kind: "work", group } : null;
+  }
+  const key = id.slice(2);
+  const fresh = list.fresh.find((thread) => `${thread.channelId}:${thread.ts}` === key);
+  if (fresh) return { kind: "new", thread: fresh, cleared: false };
+  const cleared = list.cleared.find((thread) => `${thread.channelId}:${thread.ts}` === key);
+  return cleared ? { kind: "new", thread: cleared, cleared: true } : null;
+}
+
+function ConversationRows({
+  groups,
+  selectedId,
+  onSelect,
 }: {
-  readonly environmentId: EnvironmentId;
-  readonly state: SlackState;
-  readonly onManageChannels: () => void;
+  readonly groups: ReadonlyArray<WorkGroup>;
+  readonly selectedId: string | null;
+  readonly onSelect: (id: string) => void;
 }) {
-  const settling = state.sync.syncedChannelCount < state.sync.channelCount;
-  const setDismissed = useAtomCommand(slackEnvironment.setDismissed, { reportFailure: false });
-  const [showDone, setShowDone] = useState(false);
-  const [changing, setChanging] = useState<ReadonlySet<string>>(() => new Set());
-  const mineKeys = new Set(state.conversations.map((thread) => `${thread.channelId}:${thread.ts}`));
-  const dismissedKeys = new Set(
-    state.dismissed.map((thread) => `${thread.channelId}:${thread.ts}`),
-  );
-  // A thread that became yours moves up into Your work, so it does not show twice.
-  const newThreads = state.threads.filter(
-    (thread) => !mineKeys.has(`${thread.channelId}:${thread.ts}`),
-  );
-  // Done threads, resolved in Slack or on GitHub or marked here, fold away below the open ones.
-  const isDone = (thread: SlackThread) =>
-    dismissedKeys.has(`${thread.channelId}:${thread.ts}`) || slackThreadDoneReason(thread) !== null;
-  const fresh = newThreads.filter((thread) => !isDone(thread));
-  const done = newThreads.filter(isDone);
-  const changeDismissed = (thread: SlackThread, dismissed: boolean) => {
-    const key = `${thread.channelId}:${thread.ts}`;
-    setChanging((current) => new Set(current).add(key));
-    void setDismissed({
-      environmentId,
-      input: { channelId: thread.channelId, ts: thread.ts, dismissed },
-    }).then((result) => {
-      setChanging((current) => {
-        const next = new Set(current);
-        next.delete(key);
-        return next;
-      });
-      if (result._tag === "Failure") {
-        toastManager.add({ type: "error", title: "Could not update the thread" });
-      }
-    });
-  };
-  return (
-    <section className="flex flex-col gap-3 border-t border-border pt-4" aria-label="New threads">
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-sm font-medium">New in your channels</h2>
-          <Button size="xs" variant="ghost" onClick={onManageChannels}>
-            Channels
-            {state.excludedChannelIds.length > 0
-              ? ` (${state.excludedChannelIds.length} excluded)`
-              : ""}
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {syncLabel(state.sync)}
-          {state.sync.error ? ` · ${state.sync.error}` : ""}
-        </p>
-      </div>
-      {fresh.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {state.sync.availableChannelCount > 0 && state.sync.channelCount === 0
-            ? "All channels are excluded. Use Channels to include one."
-            : settling || state.sync.channelCount === 0
-              ? "Threads show up here as channels are read."
-              : done.length > 0
-                ? "All new threads are done."
-                : "No new threads in your channels in the last day."}
-        </p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {fresh.map((thread) => (
-            <SlackThreadItem
-              key={`${thread.channelId}:${thread.ts}`}
-              environmentId={environmentId}
-              thread={thread}
-              footer={
-                <NewThreadActions
-                  environmentId={environmentId}
-                  thread={thread}
-                  busy={changing.has(`${thread.channelId}:${thread.ts}`)}
-                  onDone={() => changeDismissed(thread, true)}
-                />
-              }
+  return groups.map((group) => (
+    <WorkRow
+      key={group.id}
+      id={`c:${group.id}`}
+      selected={selectedId === `c:${group.id}`}
+      glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+      title={slackMessageSummary(group.conversation!.markdown)}
+      signals={<ConversationSignals group={group} />}
+      meta={<SlackMeta thread={group.conversation!} reason={group.reason} />}
+      updatedAt={group.updatedAt}
+      onSelect={onSelect}
+    />
+  ));
+}
+
+function NewThreadRows({
+  threads,
+  selectedId,
+  onSelect,
+}: {
+  readonly threads: ReadonlyArray<SlackThread>;
+  readonly selectedId: string | null;
+  readonly onSelect: (id: string) => void;
+}) {
+  return threads.map((thread) => {
+    const id = `n:${thread.channelId}:${thread.ts}`;
+    return (
+      <WorkRow
+        key={id}
+        id={id}
+        selected={selectedId === id}
+        glyph={<WorkStatusDot status="new" />}
+        title={slackMessageSummary(thread.markdown)}
+        signals={
+          thread.replyCount > 0 ? (
+            <span className="inline-flex items-center gap-0.5">
+              <MessageCircleIcon aria-label="Replies" className="size-3.5" />
+              {thread.replyCount}
+            </span>
+          ) : null
+        }
+        meta={<SlackMeta thread={thread} />}
+        updatedAt={slackIso(thread.latestReplyTs ?? thread.ts)}
+        onSelect={onSelect}
+      />
+    );
+  });
+}
+
+function OtherWorkRows({
+  groups,
+  projects,
+  selectedId,
+  onSelect,
+}: {
+  readonly groups: ReadonlyArray<WorkGroup>;
+  readonly projects: ReadonlyArray<EnvironmentProject>;
+  readonly selectedId: string | null;
+  readonly onSelect: (id: string) => void;
+}) {
+  return groups.map((group) => {
+    const primary = group.threads[0]!;
+    const project = projects.find(
+      (candidate) =>
+        candidate.environmentId === primary.environmentId && candidate.id === primary.projectId,
+    );
+    const pullRequest = group.pullRequests[0]?.snapshot;
+    return (
+      <WorkRow
+        key={group.id}
+        id={`w:${group.id}`}
+        selected={selectedId === `w:${group.id}`}
+        glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        title={primary.title}
+        signals={
+          pullRequest ? (
+            <PullRequestStateGlyph
+              state={pullRequest.state}
+              isDraft={pullRequest.isDraft}
+              className="size-3.5"
             />
-          ))}
-        </div>
-      )}
-      {done.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <div>
-            <Button size="xs" variant="ghost" onClick={() => setShowDone(!showDone)}>
-              {showDone ? "Hide" : "Show"} done ({done.length})
-            </Button>
-          </div>
-          {showDone
-            ? done.map((thread) => (
-                <SlackThreadItem
-                  key={`${thread.channelId}:${thread.ts}`}
-                  environmentId={environmentId}
-                  thread={thread}
-                  footer={
-                    // Threads done in Slack or on GitHub reopen there; only a local mark undoes here.
-                    slackThreadDoneReason(thread) === null ? (
-                      <div className="ps-11">
-                        <Button
-                          size="xs"
-                          variant="outline"
-                          disabled={changing.has(`${thread.channelId}:${thread.ts}`)}
-                          onClick={() => changeDismissed(thread, false)}
-                        >
-                          Not done
-                        </Button>
-                      </div>
-                    ) : undefined
-                  }
-                />
-              ))
-            : null}
-        </div>
-      ) : null}
-    </section>
+          ) : null
+        }
+        meta={
+          <>
+            {project ? <span className="min-w-0 max-w-40 truncate">{project.title}</span> : null}
+            {project ? WORK_META_SEPARATOR : null}
+            <span className="min-w-0 truncate">{group.reason}</span>
+          </>
+        }
+        updatedAt={group.updatedAt}
+        onSelect={onSelect}
+      />
+    );
+  });
+}
+
+function ToggleButton({
+  open,
+  onToggle,
+}: {
+  readonly open: boolean;
+  readonly onToggle: () => void;
+}) {
+  return (
+    <Button size="xs" variant="ghost" className="-my-1" onClick={onToggle}>
+      {open ? "Hide" : "Show"}
+    </Button>
   );
 }
 
-/** Your Slack conversations and the work on them, then new threads to triage. */
+/** Your Slack conversations and the work on them, grouped by what they need, beside a detail. */
 export function JobPage() {
-  useEscapeToGoBack();
   const environmentId = usePrimaryEnvironmentId();
   const state = useSlackState(environmentId);
+  const projects = useProjects();
+  const configs = useServerConfigs();
+  const bootstrapped = useAllEnvironmentShellsBootstrapped();
+  const list = useWorkList(state);
+  const refresh = useAtomCommand(slackEnvironment.refresh);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
+  const [showCleared, setShowCleared] = useState(false);
+  const [showAllNew, setShowAllNew] = useState(false);
+  const [showOther, setShowOther] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [managingChannels, setManagingChannels] = useState(false);
-  // Signing in again from Settings keeps the feed; only the connection is being renewed.
-  const connected =
-    state !== null &&
-    (state.connection.status === "connected" ||
-      (state.connection.status === "authorizing" && state.connection.connectedAs !== undefined));
+  const [choosingFolders, setChoosingFolders] = useState(false);
+  const selection = selectionFor(list, selectedId);
+  // Escape closes the open item before it leaves the page.
+  const closeSelection = useCallback(() => setSelectedId(null), []);
+  useEscapeToGoBack(selection ? closeSelection : undefined);
+  const agentRoot = useMemo(() => {
+    const roots = [...new Set(projects.map((project) => project.environmentId))].flatMap((id) =>
+      workRootsForEnvironment(projects, id, configs.get(id)),
+    );
+    return roots.find((project) => project.environmentId === environmentId) ?? roots[0] ?? null;
+  }, [projects, configs, environmentId]);
+  const active = list.needs.length + list.working.length + list.waiting.length;
+  // Without Slack, T3 work is all there is.
+  const otherOpen = showOther || !list.slackConnected;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        <WorkspacePageHeader electron={isElectron}>
-          <WorkspaceBreadcrumb ariaLabel="Work breadcrumb" className="min-w-0">
-            <WorkspaceBreadcrumbItem current>
-              <h1>Tuyo Work</h1>
-            </WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
-          {connected && environmentId ? (
-            <JobHeaderActions
-              environmentId={environmentId}
-              state={state}
-              onManageChannels={() => setManagingChannels(true)}
-            />
-          ) : null}
-        </WorkspacePageHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <WorkspacePageContainer width="readable" className="gap-4">
-            <WorkOverview slackState={state} environmentId={environmentId} />
-            {connected && environmentId ? (
-              <NewThreadsFeed
+      <div className="relative flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+          <WorkspacePageHeader electron={isElectron} reserveNativeControls={selection === null}>
+            <WorkspaceBreadcrumb ariaLabel="Work breadcrumb" className="min-w-0">
+              <WorkspaceBreadcrumbItem current>
+                <h1>Tuyo Work</h1>
+              </WorkspaceBreadcrumbItem>
+            </WorkspaceBreadcrumb>
+            <div className="ms-auto flex min-w-0 items-center gap-1">
+              {list.slackConnected && state ? (
+                <span className="hidden min-w-0 truncate text-xs text-muted-foreground lg:block">
+                  {syncLabel(state.sync)}
+                  {state.sync.error ? ` · ${state.sync.error}` : ""}
+                </span>
+              ) : null}
+              <WorkAgentButton root={agentRoot} groups={list.all} projects={projects} />
+              {list.slackConnected && environmentId ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        aria-label="Check Slack now"
+                        aria-busy={refreshing}
+                        disabled={refreshing}
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={() => {
+                          setRefreshing(true);
+                          void refresh({ environmentId, input: {} }).finally(() =>
+                            setRefreshing(false),
+                          );
+                        }}
+                      />
+                    }
+                  >
+                    <RefreshIcon size="sm" refreshing={refreshing} />
+                  </TooltipTrigger>
+                  <TooltipPopup side="bottom">Check Slack now</TooltipPopup>
+                </Tooltip>
+              ) : null}
+              <JobHeaderMenu
                 environmentId={environmentId}
-                state={state}
+                slackConnected={list.slackConnected}
                 onManageChannels={() => setManagingChannels(true)}
+                onChooseFolders={() => setChoosingFolders(true)}
               />
-            ) : null}
-          </WorkspacePageContainer>
-        </ScrollArea>
+            </div>
+          </WorkspacePageHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <WorkspacePageContainer width="readable" className="gap-5 px-2 sm:px-3">
+              {!list.slackConnected ? (
+                state === null ? null : (
+                  <div className="mx-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border px-3 py-2.5">
+                    <p className="text-sm text-muted-foreground">
+                      Connect Slack to see your conversations and Devin sessions here.
+                    </p>
+                    <Button size="xs" variant="outline" render={<Link to="/settings/work" />}>
+                      Set up
+                    </Button>
+                  </div>
+                )
+              ) : active === 0 ? (
+                <p className="px-3 text-sm text-muted-foreground">
+                  Nothing is open right now. New threads from your channels are below.
+                </p>
+              ) : null}
+              {(
+                [
+                  ["Needs me", list.needs],
+                  ["In progress", list.working],
+                  ["Waiting", list.waiting],
+                ] as const
+              ).map(([label, groups]) =>
+                groups.length > 0 ? (
+                  <section key={label} className="flex flex-col">
+                    <WorkGroupHeader label={label} count={groups.length} />
+                    <ConversationRows
+                      groups={groups}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  </section>
+                ) : null,
+              )}
+              {list.slackConnected ? (
+                <section className="flex flex-col">
+                  <WorkGroupHeader
+                    label="New in your channels"
+                    count={list.fresh.length}
+                    action={
+                      list.cleared.length > 0 ? (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="-my-1"
+                          onClick={() => setShowCleared(!showCleared)}
+                        >
+                          {showCleared ? "Hide" : "Show"} cleared {list.cleared.length}
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                  {list.fresh.length === 0 ? (
+                    <p className="px-3 py-1 text-xs text-muted-foreground">
+                      No new threads in your channels in the last day.
+                    </p>
+                  ) : (
+                    <>
+                      <NewThreadRows
+                        threads={showAllNew ? list.fresh : list.fresh.slice(0, NEW_PREVIEW)}
+                        selectedId={selectedId}
+                        onSelect={setSelectedId}
+                      />
+                      {list.fresh.length > NEW_PREVIEW ? (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          className="ms-8 self-start"
+                          onClick={() => setShowAllNew(!showAllNew)}
+                        >
+                          {showAllNew ? "Show fewer" : `Show all ${list.fresh.length}`}
+                        </Button>
+                      ) : null}
+                    </>
+                  )}
+                  {showCleared ? (
+                    <NewThreadRows
+                      threads={list.cleared}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  ) : null}
+                </section>
+              ) : null}
+              {list.done.length > 0 ? (
+                <section className="flex flex-col">
+                  <WorkGroupHeader
+                    label="Done"
+                    count={list.done.length}
+                    action={
+                      <ToggleButton open={showDone} onToggle={() => setShowDone(!showDone)} />
+                    }
+                  />
+                  {showDone ? (
+                    <ConversationRows
+                      groups={list.done}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  ) : null}
+                </section>
+              ) : null}
+              <section className="flex flex-col">
+                <WorkGroupHeader
+                  label="Other work"
+                  count={list.other.length}
+                  action={
+                    list.slackConnected ? (
+                      <ToggleButton open={showOther} onToggle={() => setShowOther(!showOther)} />
+                    ) : undefined
+                  }
+                />
+                {otherOpen ? (
+                  !bootstrapped ? (
+                    <p className="px-3 py-1 text-xs text-muted-foreground">
+                      Loading work from your environments…
+                    </p>
+                  ) : list.includedProjects.length === 0 ? (
+                    <p className="px-3 py-1 text-xs text-muted-foreground">
+                      Choose folders from the menu to show T3 work that is not tied to a Slack
+                      conversation.
+                    </p>
+                  ) : list.other.length === 0 ? (
+                    <p className="px-3 py-1 text-xs text-muted-foreground">No other work.</p>
+                  ) : (
+                    <OtherWorkRows
+                      groups={list.other}
+                      projects={projects}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  )
+                ) : null}
+              </section>
+            </WorkspacePageContainer>
+          </div>
+        </div>
+        {selection ? (
+          // Beside the list where there is room; over it on narrow windows.
+          <aside
+            aria-label="Selected work"
+            className="absolute inset-0 z-10 flex min-h-0 flex-col bg-background lg:static lg:w-[min(38rem,50%)] lg:shrink-0 lg:border-l lg:border-border/70"
+          >
+            <WorkDetail
+              selection={selection}
+              environmentId={environmentId}
+              projects={projects}
+              onClose={closeSelection}
+            />
+          </aside>
+        ) : null}
       </div>
-      {connected && environmentId ? (
+      {list.slackConnected && environmentId && state ? (
         <ChannelExclusionsDialog
           environmentId={environmentId}
           state={state}
@@ -377,6 +650,12 @@ export function JobPage() {
           onOpenChange={setManagingChannels}
         />
       ) : null}
+      <WorkScopeDialog
+        open={choosingFolders}
+        onOpenChange={setChoosingFolders}
+        projects={projects}
+        configs={configs}
+      />
     </SidebarInset>
   );
 }
