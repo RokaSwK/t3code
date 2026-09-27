@@ -736,4 +736,91 @@ describe("SlackService", () => {
       ),
     );
   });
+
+  it.live("shows what an earlier run read before Slack answers", () => {
+    const secrets = new Map<string, Uint8Array>([
+      [
+        "slack-connection",
+        new TextEncoder().encode(
+          JSON.stringify({
+            clientId: "123.456",
+            accessToken: "xoxp-test",
+            teamName: "Acme",
+            teamUrl: "https://acme.slack.com/",
+            userId: "U1",
+            userName: "ada",
+          }),
+        ),
+      ],
+    ]);
+    const layer = (http: Layer.Layer<HttpClient.HttpClient>) =>
+      SlackService.layer.pipe(
+        Layer.provide(http),
+        Layer.provide(memorySecrets(secrets)),
+        Layer.provide(NodeServices.layer),
+        Layer.provide(fakeGitHub),
+      );
+    // Slack never answers, so anything in the first state came from the cache.
+    const unreachable = Layer.succeed(
+      HttpClient.HttpClient,
+      HttpClient.make(() => Effect.never),
+    );
+    return Effect.gen(function* () {
+      yield* waitForState(
+        (state) =>
+          state.threads.length === 1 &&
+          state.conversations.some((item) => item.channelId === "C2") &&
+          state.conversations.some((item) => item.channelId === "D9"),
+      ).pipe(Effect.provide(layer(fakeSlack([], new Set()))));
+      assert.isTrue(secrets.has("slack-cache"));
+
+      const restored = yield* Effect.gen(function* () {
+        const slack = yield* SlackService.SlackService;
+        return Option.getOrThrow(yield* slack.state.pipe(Stream.runHead));
+      }).pipe(Effect.provide(layer(unreachable)));
+      assert.strictEqual(restored.connection.status, "connected");
+      assert.strictEqual(restored.threads[0]?.authorName, "Bo");
+      assert.strictEqual(restored.sync.syncedChannelCount, 1);
+      const devin = restored.conversations.find((item) => item.channelId === "C2");
+      assert.strictEqual(devin?.lastReply?.by, "devin");
+      assert.isTrue(
+        restored.conversations.some((item) => item.channelId === "D9" && item.followed),
+      );
+    });
+  });
+
+  it.live("forgets the cache on sign-out and on an inbox reset", () => {
+    const secrets = new Map<string, Uint8Array>([
+      [
+        "slack-connection",
+        new TextEncoder().encode(
+          JSON.stringify({
+            clientId: "123.456",
+            accessToken: "xoxp-test",
+            teamName: "Acme",
+            teamUrl: "https://acme.slack.com/",
+            userId: "U1",
+            userName: "ada",
+          }),
+        ),
+      ],
+    ]);
+    return Effect.gen(function* () {
+      const slack = yield* SlackService.SlackService;
+      yield* waitForState((state) => state.threads.length === 1);
+      yield* slack.resetInbox;
+      assert.isFalse(secrets.has("slack-cache"));
+      yield* slack.disconnect;
+      assert.isFalse(secrets.has("slack-cache"));
+    }).pipe(
+      Effect.provide(
+        SlackService.layer.pipe(
+          Layer.provide(fakeSlack([], new Set())),
+          Layer.provide(memorySecrets(secrets)),
+          Layer.provide(NodeServices.layer),
+          Layer.provide(fakeGitHub),
+        ),
+      ),
+    );
+  });
 });

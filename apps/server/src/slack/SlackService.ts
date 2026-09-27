@@ -25,6 +25,9 @@ import * as NodeHttp from "node:http";
 
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
+  DevinSessionState,
+  PullRequestState,
+  SlackChannelKind,
   type DevinConnectInput,
   type DevinConnection,
   type SlackDevinSession,
@@ -38,7 +41,6 @@ import {
   parseSlackThreadUrl,
   type SlackGetThreadInput,
   type SlackThreadDetail,
-  type SlackChannelKind,
   type SlackCompleteConnectInput,
   type SlackConnectInput,
   type SlackConnection,
@@ -131,6 +133,12 @@ const CONVERSATIONS_LIMIT = 100;
 /** Devin session states are read this often, a few at a time. */
 const DEVIN_SESSIONS_INTERVAL_MS = 30_000;
 const DEVIN_SESSIONS_PER_PASS = 10;
+/**
+ * What was read from Slack, so a restart shows the page at once and only reads what changed.
+ * Kept with the other Slack secrets because it holds message text.
+ */
+const CACHE_SECRET = "slack-cache";
+const CACHE_SAVE_INTERVAL_MS = 30_000;
 const AUTHORIZATION_TIMEOUT = Duration.minutes(10);
 /** Snapshots go out at most this often while channels sync. */
 const PUBLISH_INTERVAL_MS = 2_000;
@@ -196,6 +204,67 @@ const StoredDevin = Schema.Struct({
 type StoredDevin = typeof StoredDevin.Type;
 const decodeStoredDevin = Schema.decodeUnknownOption(Schema.fromJsonString(StoredDevin));
 const encodeStoredDevin = Schema.encodeSync(Schema.fromJsonString(StoredDevin));
+
+const StoredCache = Schema.Struct({
+  version: Schema.Literal(1),
+  teamUrl: Schema.String,
+  userId: Schema.String,
+  savedAt: Schema.Number,
+  channels: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      kind: SlackChannelKind,
+      threads: Schema.Array(SlackThread),
+    }),
+  ),
+  conversations: Schema.Array(
+    Schema.Struct({
+      channelId: Schema.String,
+      ts: Schema.String,
+      followed: Schema.Boolean,
+      devin: Schema.Boolean,
+      mine: Schema.Boolean,
+      thread: Schema.optional(SlackThread),
+      latestTs: Schema.optional(Schema.String),
+    }),
+  ),
+  users: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      name: Schema.String,
+      avatarUrl: Schema.optional(Schema.String),
+    }),
+  ),
+  followedChannels: Schema.Array(
+    Schema.Struct({ id: Schema.String, name: Schema.String, kind: SlackChannelKind }),
+  ),
+  devinUser: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({ userId: Schema.String, botId: Schema.optionalKey(Schema.String) }),
+    ),
+  ),
+  devinSeenTs: Schema.optional(Schema.String),
+  pullRequests: Schema.Array(
+    Schema.Struct({
+      url: Schema.String,
+      state: Schema.optional(PullRequestState),
+      checkedAt: Schema.Number,
+    }),
+  ),
+  devinSessions: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      state: Schema.optional(DevinSessionState),
+      title: Schema.optional(Schema.String),
+      pullRequestUrls: Schema.Array(Schema.String),
+      checkedAt: Schema.Number,
+    }),
+  ),
+});
+type StoredCache = typeof StoredCache.Type;
+const decodeStoredCache = Schema.decodeUnknownOption(Schema.fromJsonString(StoredCache));
+const encodeStoredCache = Schema.encodeSync(Schema.fromJsonString(StoredCache));
 
 /** Every Slack Web API response; method-specific fields are read where used. */
 interface SlackResponse {
@@ -557,10 +626,139 @@ const make = Effect.gen(function* () {
   const stateRef = yield* SubscriptionRef.make<SlackState>(
     snapshot(yield* Clock.currentTimeMillis),
   );
+  let cacheSavedAt = 0;
+  let cacheSaving = false;
+
+  const cacheValue = (current: StoredConnection, now: number): StoredCache => ({
+    version: 1,
+    teamUrl: current.teamUrl,
+    userId: current.userId,
+    savedAt: now,
+    channels: [...channels.values()]
+      .filter((channel) => channel.synced)
+      .map(({ id, name, kind, threads }) => ({ id, name, kind, threads })),
+    conversations: [...conversations.values()].map((entry) => ({
+      channelId: entry.channelId,
+      ts: entry.ts,
+      followed: entry.followed,
+      devin: entry.devin,
+      mine: entry.mine,
+      ...(entry.thread ? { thread: entry.thread } : {}),
+      ...(entry.latestTs ? { latestTs: entry.latestTs } : {}),
+    })),
+    users: [...users].map(([id, user]) => ({ id, ...user })),
+    followedChannels: [...followedChannels].map(([id, channel]) => ({ id, ...channel })),
+    ...(devinUser !== undefined ? { devinUser } : {}),
+    ...(devinSeenTs ? { devinSeenTs } : {}),
+    pullRequests: [...pullRequestStates].map(([url, known]) => ({ url, ...known })),
+    devinSessions: [...devinSessions].map(([id, known]) => ({ id, ...known })),
+  });
+
+  const saveCache = Effect.suspend(() => {
+    const current = connection;
+    if (!current || cacheSaving) return Effect.void;
+    cacheSaving = true;
+    return Clock.currentTimeMillis.pipe(
+      Effect.flatMap((now) => {
+        cacheSavedAt = now;
+        return secrets.set(
+          CACHE_SECRET,
+          new TextEncoder().encode(encodeStoredCache(cacheValue(current, now))),
+        );
+      }),
+      Effect.ignore,
+      Effect.ensuring(Effect.sync(() => void (cacheSaving = false))),
+    );
+  });
+
+  /** Puts a cache from an earlier run back, so the first state already has the page. */
+  const restoreCache = Effect.gen(function* () {
+    const current = connection;
+    if (!current) return;
+    const stored = yield* secrets.get(CACHE_SECRET).pipe(
+      Effect.map(Option.flatMap((bytes) => decodeStoredCache(new TextDecoder().decode(bytes)))),
+      Effect.orElseSucceed(() => Option.none<StoredCache>()),
+    );
+    if (
+      Option.isNone(stored) ||
+      stored.value.teamUrl !== current.teamUrl ||
+      stored.value.userId !== current.userId
+    ) {
+      return;
+    }
+    const cache = stored.value;
+    const now = yield* Clock.currentTimeMillis;
+    for (const user of cache.users) {
+      users.set(user.id, {
+        name: user.name,
+        ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
+      });
+    }
+    for (const channel of cache.followedChannels) {
+      followedChannels.set(channel.id, { name: channel.name, kind: channel.kind });
+    }
+    // Channels come back on their usual schedule, busy ones first.
+    for (const channel of cache.channels) {
+      const latest = slackLatestActivityMs(
+        channel.threads.map((thread) => ({
+          ts: thread.ts,
+          ...(thread.latestReplyTs ? { latest_reply: thread.latestReplyTs } : {}),
+        })),
+      );
+      channels.set(channel.id, {
+        id: channel.id,
+        name: channel.name,
+        kind: channel.kind,
+        synced: true,
+        threads: channel.threads,
+        nextPollAt: now + slackPollDelayMs(latest, now) / 2,
+      });
+    }
+    for (const saved of cache.conversations) {
+      const yours = saved.followed || saved.mine;
+      conversations.set(conversationKey(saved), {
+        channelId: saved.channelId,
+        ts: saved.ts,
+        followed: saved.followed,
+        devin: saved.devin,
+        mine: saved.mine,
+        ...(saved.thread ? { thread: saved.thread } : {}),
+        ...(saved.latestTs ? { latestTs: saved.latestTs } : {}),
+        // Search and your reactions say which ones changed; the rest wait their turn.
+        nextReadAt: !saved.thread
+          ? 0
+          : yours
+            ? now + slackConversationDelayMs(slackTsToMs(saved.latestTs ?? saved.ts), now)
+            : Number.POSITIVE_INFINITY,
+      });
+    }
+    if (cache.devinUser !== undefined) devinUser = cache.devinUser;
+    if (cache.devinSeenTs) devinSeenTs = cache.devinSeenTs;
+    for (const request of cache.pullRequests) {
+      pullRequestStates.set(request.url, {
+        ...(request.state ? { state: request.state } : {}),
+        checkedAt: request.checkedAt,
+      });
+    }
+    for (const session of cache.devinSessions) {
+      devinSessions.set(session.id, {
+        ...(session.state ? { state: session.state } : {}),
+        ...(session.title ? { title: session.title } : {}),
+        pullRequestUrls: session.pullRequestUrls,
+        checkedAt: session.checkedAt,
+      });
+    }
+    lastSyncedAt = cache.savedAt;
+    cacheSavedAt = now;
+  });
+
   const publish = Effect.gen(function* () {
     dirty = false;
     publishedAt = yield* Clock.currentTimeMillis;
     yield* SubscriptionRef.set(stateRef, snapshot(publishedAt));
+    if (connection && publishedAt - cacheSavedAt >= CACHE_SAVE_INTERVAL_MS) {
+      yield* saveCache.pipe(Effect.forkIn(layerScope));
+    }
   });
 
   const dismissedKept = (thread: SlackDismissedThread, cutoff: number) =>
@@ -1377,28 +1575,31 @@ const make = Effect.gen(function* () {
     return fiber ? Fiber.interrupt(fiber) : Effect.void;
   });
 
-  const startSync = Effect.gen(function* () {
-    yield* stopSync;
-    channels.clear();
-    users.clear();
-    customEmoji = new Map();
-    channelsListedAt = 0;
-    lastSyncedAt = undefined;
-    syncError = undefined;
-    followedRefreshedAt = 0;
-    followedChannels.clear();
-    conversations.clear();
-    devinUser = undefined;
-    devinSeenTs = undefined;
-    devinSearchedAt = 0;
-    searchScopeMissing = false;
-    devinSessions.clear();
-    devinSessionsCheckedAt = 0;
-    members = undefined;
-    pullRequestStates.clear();
-    pullRequestsScannedAt = 0;
-    syncFiber = yield* syncLoop.pipe(Effect.forkIn(layerScope));
-  });
+  /** Starts reading Slack; `restore` first brings back what an earlier run read. */
+  const startSync = (restore: boolean) =>
+    Effect.gen(function* () {
+      yield* stopSync;
+      channels.clear();
+      users.clear();
+      customEmoji = new Map();
+      channelsListedAt = 0;
+      lastSyncedAt = undefined;
+      syncError = undefined;
+      followedRefreshedAt = 0;
+      followedChannels.clear();
+      conversations.clear();
+      devinUser = undefined;
+      devinSeenTs = undefined;
+      devinSearchedAt = 0;
+      searchScopeMissing = false;
+      devinSessions.clear();
+      devinSessionsCheckedAt = 0;
+      members = undefined;
+      pullRequestStates.clear();
+      pullRequestsScannedAt = 0;
+      if (restore) yield* restoreCache;
+      syncFiber = yield* syncLoop.pipe(Effect.forkIn(layerScope));
+    });
 
   // ---------------------------------------------------------------------------
   // Connection
@@ -1420,6 +1621,7 @@ const make = Effect.gen(function* () {
       excludedChannelIds = new Set();
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
+      yield* secrets.remove(CACHE_SECRET).pipe(Effect.ignore);
       yield* publish;
     });
 
@@ -1480,7 +1682,7 @@ const make = Effect.gen(function* () {
     connectionError = undefined;
     lastClientId = next.clientId;
     if (authorization === pending) yield* endAuthorization(true);
-    yield* startSync;
+    yield* startSync(true);
     yield* publish;
   });
 
@@ -1655,7 +1857,8 @@ const make = Effect.gen(function* () {
     inboxStartedAtMs = startedAtMs;
     dismissed = [];
     excludedChannelIds = new Set();
-    yield* startSync;
+    yield* secrets.remove(CACHE_SECRET).pipe(Effect.ignore);
+    yield* startSync(false);
     yield* publish;
   });
 
@@ -1996,13 +2199,15 @@ const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => Option.none<StoredDevin>()),
   );
   if (Option.isSome(storedDevin)) devin = storedDevin.value;
+  // What was read survives a restart; the next start picks up from it.
+  yield* Effect.addFinalizer(() => saveCache);
   if (Option.isSome(stored)) {
     connection = stored.value;
     yield* loadDismissed;
     yield* loadExcludedChannels;
     yield* loadInboxStart;
     lastClientId = stored.value.clientId;
-    yield* startSync;
+    yield* startSync(true);
   }
   yield* publish;
 
