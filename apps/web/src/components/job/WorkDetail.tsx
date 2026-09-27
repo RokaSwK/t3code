@@ -1,7 +1,3 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { canWaitForMerge } from "@t3tools/shared/threadPullRequests";
-import { useThreadActions } from "~/hooks/useThreadActions";
-import { useServerConfigs } from "~/state/entities";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   type EnvironmentId,
@@ -76,56 +72,25 @@ const LINK_ROW_CLASS =
 
 function ThreadRows({ threads }: { readonly threads: ReadonlyArray<WorkThread> }) {
   const navigate = useNavigate();
-  const configs = useServerConfigs();
-  const { snoozeThread, unsnoozeThread } = useThreadActions();
-  const [busy, setBusy] = useState<string | null>(null);
-  return threads.map((thread) => {
-    const ref = scopeThreadRef(thread.environmentId, thread.id);
-    const waiting = thread.waitingForMergeAt != null;
-    return (
-      <div key={`${thread.environmentId}:${thread.id}`} className="flex items-center gap-2">
-        <button
-          type="button"
-          className={`${LINK_ROW_CLASS} flex-1`}
-          onClick={() =>
-            void navigate({
-              to: "/$environmentId/$threadId",
-              params: { environmentId: thread.environmentId, threadId: thread.id },
-            })
-          }
-        >
-          <T3Logo className="size-4 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-          <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">
-            {formatRelativeTimeLabel(thread.updatedAt)}
-          </span>
-        </button>
-        {configs.get(thread.environmentId)?.environment.capabilities.threadMergeWait === true &&
-        (waiting || canWaitForMerge(thread.pullRequests)) ? (
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={
-              busy !== null ||
-              thread.settledAt !== null ||
-              thread.hasPendingApprovals ||
-              thread.hasPendingUserInput
-            }
-            onClick={() => {
-              setBusy(thread.id);
-              void (waiting ? unsnoozeThread(ref) : snoozeThread(ref, null)).then((result) => {
-                setBusy(null);
-                if (result._tag === "Failure")
-                  toastManager.add({ type: "error", title: "Could not change merge wait" });
-              });
-            }}
-          >
-            {waiting ? "Wake" : "Wait for merge"}
-          </Button>
-        ) : null}
-      </div>
-    );
-  });
+  return threads.map((thread) => (
+    <button
+      key={`${thread.environmentId}:${thread.id}`}
+      type="button"
+      className={LINK_ROW_CLASS}
+      onClick={() =>
+        void navigate({
+          to: "/$environmentId/$threadId",
+          params: { environmentId: thread.environmentId, threadId: thread.id },
+        })
+      }
+    >
+      <T3Logo className="size-4 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+      <span className="shrink-0 text-2xs text-muted-foreground tabular-nums">
+        {formatRelativeTimeLabel(thread.updatedAt)}
+      </span>
+    </button>
+  ));
 }
 
 function pullRequestSummary(request: WorkPullRequest): string {

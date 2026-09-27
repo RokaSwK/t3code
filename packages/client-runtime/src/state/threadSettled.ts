@@ -54,7 +54,6 @@ export type ThreadSnoozeShell = Pick<
   OrchestrationThreadShell,
   | "snoozedUntil"
   | "snoozedAt"
-  | "waitingForMergeAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "session"
@@ -123,7 +122,6 @@ export function effectiveSnoozed(
   shell: ThreadSnoozeShell,
   options: { readonly now: string },
 ): boolean {
-  if (shell.waitingForMergeAt != null) return !threadRaisedHandWhileSnoozed(shell);
   if (shell.snoozedUntil == null) return false;
   const wakeAtMs = Date.parse(shell.snoozedUntil);
   // Malformed data never hides a thread.

@@ -460,7 +460,6 @@ export function projectEvent(
             autoSettleDisabledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
-            waitingForMergeAt: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -556,7 +555,6 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             snoozedUntil: payload.snoozedUntil,
             snoozedAt: payload.snoozedAt,
-            waitingForMergeAt: payload.waitingForMergeAt ?? null,
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -569,7 +567,6 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             snoozedUntil: null,
             snoozedAt: null,
-            waitingForMergeAt: null,
             updatedAt: payload.updatedAt,
           }),
         })),

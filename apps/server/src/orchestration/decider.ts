@@ -15,8 +15,6 @@ import {
   type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import {
-  canWaitForMerge,
-  mergeWaitOutcome,
   legacyLinkedPullRequestOf,
   legacyThreadPullRequestKey,
   normalizeThreadPullRequestKey,
@@ -588,7 +586,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      if (thread.snoozedUntil != null || thread.waitingForMergeAt != null) {
+      if (thread.snoozedUntil != null) {
         companionEvents.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
@@ -599,12 +597,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           type: "thread.unsnoozed",
           payload: {
             threadId: command.threadId,
-            ...(thread.waitingForMergeAt != null
-              ? {
-                  mergeWait: "cancelled" as const,
-                  linkedSlackThreads: thread.linkedSlackThreads ?? [],
-                }
-              : {}),
             reason: "user",
             updatedAt: occurredAt,
           },
@@ -640,64 +632,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.merge-wait.resolve": {
-      const thread = yield* requireThreadNotArchived({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      const pending = openRequests(thread).size > 0;
-      const running = thread.session?.status === "running" || thread.session?.status === "starting";
-      if (command.outcome === "merged" && (pending || running))
-        return yield* new OrchestrationThreadSettleBlockedError({ threadId: thread.id });
-      if (
-        thread.waitingForMergeAt !== command.waitingForMergeAt ||
-        (command.outcome === "merged" && mergeWaitOutcome(thread.pullRequests) !== "merged")
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "Merge wait changed before resolution",
-        });
-      }
-      if (
-        command.outcome === "wake" &&
-        mergeWaitOutcome(thread.pullRequests) === "waiting" &&
-        !pending &&
-        !running &&
-        !(
-          thread.session?.status === "error" && thread.session.updatedAt > command.waitingForMergeAt
-        )
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "The merge wait no longer needs attention",
-        });
-      }
-      const events = yield* decideCommandSequence({
-        readModel,
-        commands: [
-          {
-            type: command.outcome === "merged" ? "thread.settle" : "thread.unsnooze",
-            commandId: command.commandId,
-            threadId: command.threadId,
-            reason: "user",
-          },
-        ],
-      });
-      return events.map((event) =>
-        event.type === "thread.unsnoozed"
-          ? {
-              ...event,
-              payload: {
-                ...event.payload,
-                mergeWait:
-                  command.outcome === "merged" ? ("merged" as const) : ("cancelled" as const),
-              },
-            }
-          : event,
-      );
-    }
-
     case "thread.snooze": {
       const thread = yield* requireThreadNotArchived({
         readModel,
@@ -711,21 +645,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // comparison also catches unparseable wake times (IsoDateTime is
       // structurally just a string): NaN fails every comparison, and an
       // unparseable snoozedUntil must never persist.
-      if (
-        command.untilMerge === true
-          ? command.snoozedUntil !== null ||
-            thread.session?.status === "running" ||
-            thread.session?.status === "starting" ||
-            !canWaitForMerge(thread.pullRequests) ||
-            thread.settledOverride === "settled"
-          : command.snoozedUntil === null ||
-            !(Date.parse(command.snoozedUntil) > Date.parse(occurredAt))
-      ) {
+      if (!(Date.parse(command.snoozedUntil) > Date.parse(occurredAt))) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: command.untilMerge
-            ? "Wait for merge requires an unsettled thread with an open linked PR and no failing checks, conflicts, or requested changes"
-            : `thread ${command.threadId} snooze wake time ${command.snoozedUntil} is not in the future`,
+          detail: `thread ${command.threadId} snooze wake time ${command.snoozedUntil} is not in the future`,
         });
       }
       // Blocked-on-you work must not be snoozed away: a pending approval or
@@ -753,9 +676,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // timestamps so the projection is a no-op. A different wake time is a
       // real change and stamps fresh.
       const existingSnoozedAt =
-        thread.snoozedUntil === command.snoozedUntil &&
-        (thread.waitingForMergeAt != null) === (command.untilMerge === true) &&
-        thread.snoozedAt != null
+        thread.snoozedUntil === command.snoozedUntil && thread.snoozedAt != null
           ? thread.snoozedAt
           : null;
       return {
@@ -769,10 +690,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           snoozedUntil: command.snoozedUntil,
-          waitingForMergeAt: command.untilMerge ? (existingSnoozedAt ?? occurredAt) : null,
-          ...(command.untilMerge || thread.waitingForMergeAt != null
-            ? { linkedSlackThreads: thread.linkedSlackThreads ?? [] }
-            : {}),
           snoozedAt: existingSnoozedAt ?? occurredAt,
           updatedAt: existingSnoozedAt !== null ? thread.updatedAt : occurredAt,
         },
@@ -788,7 +705,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       // Idempotent by re-emission (see thread.settle): waking a thread that
       // is not snoozed lands on the same null state without churning
       // updatedAt.
-      const alreadyAwake = thread.snoozedUntil == null && thread.waitingForMergeAt == null;
+      const alreadyAwake = thread.snoozedUntil == null;
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -800,12 +717,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "thread.unsnoozed",
         payload: {
           threadId: command.threadId,
-          ...(thread.waitingForMergeAt != null
-            ? {
-                mergeWait: "cancelled" as const,
-                linkedSlackThreads: thread.linkedSlackThreads ?? [],
-              }
-            : {}),
           reason: command.reason,
           updatedAt: alreadyAwake ? thread.updatedAt : occurredAt,
         },
@@ -865,7 +776,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      if (thread.snoozedUntil != null || thread.waitingForMergeAt != null) {
+      if (thread.snoozedUntil != null) {
         promotionEvents.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
@@ -876,12 +787,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           type: "thread.unsnoozed",
           payload: {
             threadId: command.threadId,
-            ...(thread.waitingForMergeAt != null
-              ? {
-                  mergeWait: "cancelled" as const,
-                  linkedSlackThreads: thread.linkedSlackThreads ?? [],
-                }
-              : {}),
             reason: "user",
             updatedAt: occurredAt,
           },
@@ -1602,7 +1507,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      if (targetThread.snoozedUntil != null || targetThread.waitingForMergeAt != null) {
+      if (targetThread.snoozedUntil != null) {
         lifecycleResetEvents.push({
           ...(yield* withEventBase({
             aggregateKind: "thread",
@@ -1613,12 +1518,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           type: "thread.unsnoozed",
           payload: {
             threadId: command.threadId,
-            ...(targetThread.waitingForMergeAt != null
-              ? {
-                  mergeWait: "cancelled" as const,
-                  linkedSlackThreads: targetThread.linkedSlackThreads ?? [],
-                }
-              : {}),
             reason: "activity",
             updatedAt: command.createdAt,
           },

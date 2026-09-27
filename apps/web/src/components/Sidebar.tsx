@@ -1,11 +1,7 @@
-import { readEnvironmentSupportsMergeWait } from "../state/entities";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
 import { requestThreadOwner, ThreadOwnerAvatar } from "./ThreadOwnerDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
-import {
-  canWaitForMerge,
-  resolveThreadCurrentPullRequestLink,
-} from "@t3tools/shared/threadPullRequests";
+import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import * as Schema from "effect/Schema";
@@ -449,7 +445,7 @@ function SidebarThreadTooltip({
 function SnoozeMenuButton(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSnooze: (preset: { readonly snoozedUntil: string | null }) => void;
+  onSnooze: (preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   timestampFormat: TimestampFormat;
 }) {
   const { open, onOpenChange, onSnooze, timestampFormat } = props;
@@ -1014,7 +1010,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
   onSettle: (threadRef: ScopedThreadRef) => void;
   onUnsettle: (threadRef: ScopedThreadRef) => void;
-  onSnooze: (threadRef: ScopedThreadRef, preset: { readonly snoozedUntil: string | null }) => void;
+  onSnooze: (threadRef: ScopedThreadRef, preset: Pick<SnoozePreset, "snoozedUntil">) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
   onUnpin: (threadRef: ScopedThreadRef) => void;
   onAcknowledgeWoke: (threadRef: ScopedThreadRef, visitedAt: string) => void;
@@ -1321,17 +1317,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     (event: ReactMouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey) {
-        onSnooze(threadRef, { snoozedUntil: null });
-        return;
-      }
       onSettle(threadRef);
       // Cmd-click also closes out the Slack conversations the thread came from.
       if ((event.metaKey || event.ctrlKey) && thread.linkedSlackThreads?.length) {
         settleSlackLinks(threadRef.environmentId, thread.linkedSlackThreads);
       }
     },
-    [onSettle, onSnooze, settleSlackLinks, thread.linkedSlackThreads, threadRef],
+    [onSettle, settleSlackLinks, thread.linkedSlackThreads, threadRef],
   );
   const handleUnsettleClick = useCallback(
     (event: ReactMouseEvent) => {
@@ -1358,7 +1350,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [onUnpin, threadRef],
   );
   const handleSnoozePreset = useCallback(
-    (preset: { readonly snoozedUntil: string | null }) => {
+    (preset: Pick<SnoozePreset, "snoozedUntil">) => {
       onSnooze(threadRef, preset);
     },
     [onSnooze, threadRef],
@@ -2646,12 +2638,7 @@ export default function Sidebar() {
         ).push(
           optimisticDrop.clearsSnooze
             ? projected
-            : {
-                ...projected,
-                snoozedAt: thread.snoozedAt,
-                snoozedUntil: thread.snoozedUntil,
-                waitingForMergeAt: thread.waitingForMergeAt,
-              },
+            : { ...projected, snoozedAt: thread.snoozedAt, snoozedUntil: thread.snoozedUntil },
         );
       } else if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
         // Snooze outranks settlement and pinning until the thread wakes.
@@ -3782,7 +3769,7 @@ export default function Sidebar() {
   const performSnooze = useCallback(
     async (
       threadRef: ScopedThreadRef,
-      preset: { readonly snoozedUntil: string | null },
+      preset: Pick<SnoozePreset, "snoozedUntil">,
       opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
     ) => {
       const threadKey = scopedThreadKey(threadRef);
@@ -3824,7 +3811,7 @@ export default function Sidebar() {
   const attemptSnooze = useCallback(
     (
       threadRef: ScopedThreadRef,
-      preset: { readonly snoozedUntil: string | null },
+      preset: Pick<SnoozePreset, "snoozedUntil">,
       opts: { coSnoozingKeys?: ReadonlySet<string> } = {},
     ) => {
       void (async () => {
@@ -4137,7 +4124,6 @@ export default function Sidebar() {
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
               isSnoozed,
-              canWaitForMerge: canWaitForMerge(thread.pullRequests),
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
               isRegeneratingTitle,
               isRunning:
@@ -4146,7 +4132,6 @@ export default function Sidebar() {
                 settlement: supportsSettlement,
                 autoSettleOptOut: supportsAutoSettleOptOut,
                 snooze: supportsSnooze,
-                mergeWait: readEnvironmentSupportsMergeWait(threadRef.environmentId),
                 pinning: supportsPinning,
                 titleRegeneration: supportsTitleRegeneration,
                 ownership: supportsOwnership,
@@ -4203,9 +4188,6 @@ export default function Sidebar() {
             }
             return;
           }
-          case "wait-for-merge":
-            attemptSnooze(threadRef, { snoozedUntil: null });
-            return;
           case "settle":
             attemptSettle(threadRef);
             return;
@@ -4803,13 +4785,11 @@ export default function Sidebar() {
                               dragState?.activeKey === threadKey && dragTargetSection === "pinned"
                             }
                             snoozeWakeLabelText={
-                              section === "snoozed" && thread.waitingForMergeAt != null
-                                ? "Merge"
-                                : section === "snoozed" && thread.snoozedUntil != null
-                                  ? snoozeWakeLabel(thread.snoozedUntil, {
-                                      now: new Date().toISOString(),
-                                    })
-                                  : null
+                              section === "snoozed" && thread.snoozedUntil != null
+                                ? snoozeWakeLabel(thread.snoozedUntil, {
+                                    now: new Date().toISOString(),
+                                  })
+                                : null
                             }
                             // All sections: a woken thread can classify straight
                             // into the settled tail (PR merged while snoozed), and

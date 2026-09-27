@@ -17,7 +17,6 @@ export type ThreadActionMenuId =
   | "auto-settle"
   | "auto-settle:enabled"
   | "auto-settle:disabled"
-  | "wait-for-merge"
   | "snooze"
   | `snooze:${string}`
   | "unsnooze"
@@ -49,7 +48,6 @@ export interface ThreadActionMenuState {
   readonly autoSettleEnabled: boolean;
   readonly isSnoozed: boolean;
   readonly canSnoozeNow: boolean;
-  readonly canWaitForMerge?: boolean;
   readonly isRegeneratingTitle: boolean;
   /** Archive rejects a thread with an active turn, so disable it here rather than let the action fail. */
   readonly isRunning: boolean;
@@ -58,7 +56,6 @@ export interface ThreadActionMenuState {
     /** Server understands thread.auto-settle.set. */
     readonly autoSettleOptOut: boolean;
     readonly snooze: boolean;
-    readonly mergeWait?: boolean;
     readonly pinning: boolean;
     readonly titleRegeneration: boolean;
     /** Server understands `owner` on thread.meta.update. */
@@ -100,16 +97,6 @@ export function buildThreadActionMenuItems(
           state.isSettled
             ? { id: "unsettle" as const, label: "Un-settle thread", icon: "circle-check" }
             : { id: "settle" as const, label: "Settle thread", icon: "circle-check" },
-        ]
-      : []),
-    ...(state.supports.mergeWait && !state.isSettled && !state.isSnoozed
-      ? [
-          {
-            id: "wait-for-merge" as const,
-            label: "Wait for merge",
-            icon: "clock",
-            disabled: !state.canSnoozeNow || !state.canWaitForMerge || state.isRunning,
-          },
         ]
       : []),
     ...(state.supports.snooze

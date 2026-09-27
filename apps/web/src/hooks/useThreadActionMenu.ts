@@ -1,4 +1,3 @@
-import { canWaitForMerge } from "@t3tools/shared/threadPullRequests";
 import { requestCustomSnooze } from "../components/CustomSnoozeDialog";
 import { requestThreadOwner } from "../components/ThreadOwnerDialog";
 import { scopeProjectRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
@@ -27,7 +26,6 @@ import {
   readEnvironmentSupportsPinning,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
-  readEnvironmentSupportsMergeWait,
   readEnvironmentSupportsTitleRegeneration,
   readThreadShell,
   useProjects,
@@ -140,7 +138,6 @@ export function useThreadActionMenu(input: {
           settlement: readEnvironmentSupportsSettlement(threadRef.environmentId),
           autoSettleOptOut: readEnvironmentSupportsAutoSettleOptOut(threadRef.environmentId),
           snooze: readEnvironmentSupportsSnooze(threadRef.environmentId),
-          mergeWait: readEnvironmentSupportsMergeWait(threadRef.environmentId),
           pinning: readEnvironmentSupportsPinning(threadRef.environmentId),
           titleRegeneration: readEnvironmentSupportsTitleRegeneration(threadRef.environmentId),
           ownership: readEnvironmentSupportsOwnership(threadRef.environmentId),
@@ -156,7 +153,6 @@ export function useThreadActionMenu(input: {
           isSettled: supports.settlement && thread.settledOverride === "settled",
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
           isSnoozed: supports.snooze && effectiveSnoozed(thread, { now: now.toISOString() }),
-          canWaitForMerge: canWaitForMerge(thread.pullRequests),
           canSnoozeNow: canSnooze(thread, { now: now.toISOString() }),
           isRegeneratingTitle,
           isRunning: thread.session?.status === "running" && thread.session.activeTurnId != null,
@@ -220,9 +216,6 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
-          case "wait-for-merge":
-            await reportFailure("Failed to wait for merge", () => snoozeThread(threadRef, null));
-            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;

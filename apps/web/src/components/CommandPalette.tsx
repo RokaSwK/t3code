@@ -1,8 +1,7 @@
-import { useThreadActions } from "../hooks/useThreadActions";
-("use client");
+"use client";
 
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
-import { canWaitForMerge, visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
@@ -783,7 +782,6 @@ function OpenCommandPaletteDialog(props: {
   }, [activeThreadReferenceCopyTarget]);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
-  const { snoozeThread, unsnoozeThread } = useThreadActions();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const {
     theme,
@@ -1820,28 +1818,6 @@ function OpenCommandPaletteDialog(props: {
       icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
       run: async () => {
         useRightPanelStore.getState().open(threadRef, "slack");
-      },
-    });
-  }
-
-  if (activeThread && activeThreadServerConfig?.environment.capabilities.threadMergeWait === true) {
-    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
-    const waiting = activeThread.waitingForMergeAt != null;
-    actionItems.push({
-      kind: "action",
-      value: "action:wait-for-merge",
-      title: waiting ? "Cancel merge wait" : "Wait for merge",
-      searchTerms: ["snooze", "waiting", "merge", "pull request"],
-      disabled:
-        !waiting &&
-        (!canWaitForMerge(activeThread.pullRequests) || activeThread.settledOverride === "settled"),
-      icon: <PullRequestGlyph.link className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        const result = waiting
-          ? await unsnoozeThread(threadRef)
-          : await snoozeThread(threadRef, null);
-        if (result._tag === "Failure")
-          toastManager.add({ type: "error", title: "Could not change merge wait" });
       },
     });
   }

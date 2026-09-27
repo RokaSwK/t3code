@@ -32,7 +32,6 @@ export type WorkThread = { readonly environmentId: EnvironmentId } & Pick<
   | "updatedAt"
   | "archivedAt"
   | "settledAt"
-  | "waitingForMergeAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "hasActionableProposedPlan"
@@ -176,8 +175,6 @@ function statusOf(
 ): Attention {
   const needs = agentNeeds(threads) ?? pullRequestNeeds(pullRequests);
   if (needs) return needs;
-  if (threads.some((thread) => thread.waitingForMergeAt != null))
-    return { status: "waiting", reason: "Waiting for merge" };
   if (agentWorking(threads)) return { status: "working", reason: "Agent working" };
   const waiting = pullRequestWaiting(pullRequests);
   if (waiting) return waiting;
@@ -250,18 +247,6 @@ function conversationStatusOf(
   pullRequestDetails: ReadonlyMap<string, WorkGitHubPullRequest>,
   now: number,
 ): Attention {
-  if (threads.some((thread) => thread.waitingForMergeAt != null)) {
-    const needs = agentNeeds(threads) ?? pullRequestNeeds(pullRequests);
-    if (needs) return needs;
-    const trouble = linkedPullRequestAttention(
-      (conversation.pullRequests ?? []).flatMap((request) => {
-        const detail = pullRequestDetails.get(pullRequestUrlKey(request.url));
-        return detail ? [detail] : [];
-      }),
-    );
-    if (trouble && trouble.reason !== "PR approved, ready to merge") return trouble;
-    return { status: "waiting", reason: "Waiting for merge" };
-  }
   const tick = slackThreadDoneReason({ ...conversation, pullRequests: [] });
   if (tick) return { status: "done", reason: tick };
   if (markedDone) return { status: "done", reason: "Marked done" };
