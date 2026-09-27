@@ -59,7 +59,8 @@ export function WorkAgentButton({
 
   const open = async () => {
     if (!environmentId || pending) return;
-    if (agentThread) {
+    // A thread in another folder was started before the folder changed; start over there.
+    if (agentThread && (!home || agentThread.projectId === home.id)) {
       const threadRef = scopeThreadRef(environmentId, agentThread.id);
       useComposerDraftStore.getState().setPrompt(threadRef, WORK_AGENT_TRIAGE_PROMPT);
       await navigate({
