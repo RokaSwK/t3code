@@ -69,6 +69,10 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:set-channel-excluded",
       tag: WS_METHODS.slackSetChannelExcluded,
     }),
+    setConversationOwner: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-conversation-owner",
+      tag: WS_METHODS.slackSetConversationOwner,
+    }),
     devinConnect: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:devin-connect",
       tag: WS_METHODS.devinConnect,

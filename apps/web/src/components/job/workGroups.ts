@@ -57,6 +57,14 @@ export interface WorkGroup {
   readonly updatedAt: string;
   /** Marked done here, and not reopened by a later reply from someone else. */
   readonly markedDone: boolean;
+  /** Someone the conversation was handed to; it is watched, not yours to act on. */
+  readonly owner: WorkOwner | null;
+}
+
+export interface WorkOwner {
+  readonly userId: string;
+  readonly name: string;
+  readonly avatarUrl?: string | undefined;
 }
 
 /** A conversation where only you or Devin spoke last goes quiet into Done after this. */
@@ -281,6 +289,9 @@ export function buildWorkGroups(
   options: {
     readonly conversations?: ReadonlyArray<SlackThread>;
     readonly dismissed?: ReadonlyArray<SlackDismissedThread>;
+    readonly owners?: ReadonlyArray<
+      WorkOwner & { readonly channelId: string; readonly ts: string }
+    >;
     readonly now?: number;
   } = {},
 ): WorkGroup[] {
@@ -346,6 +357,9 @@ export function buildWorkGroups(
       ref.at ?? Number.POSITIVE_INFINITY,
     ]),
   );
+  const ownerOf = new Map(
+    (options.owners ?? []).map((entry) => [`${entry.channelId}:${entry.ts}`, entry] as const),
+  );
   return [...buckets.values()].map((members): WorkGroup => {
     const group = members.filter((index) => index < threads.length).map((index) => threads[index]!);
     // Rarely two of your conversations share a PR; the most recent one leads.
@@ -386,6 +400,7 @@ export function buildWorkGroups(
         ...conversationStatusOf(conversation, ordered, requests, markedDone, now),
         updatedAt: new Date(lastActivityMs(conversation, ordered)).toISOString(),
         markedDone,
+        owner: ownerOf.get(`${conversation.channelId}:${conversation.ts}`) ?? null,
       };
     }
     return {
@@ -397,6 +412,7 @@ export function buildWorkGroups(
       ...statusOf(group, requests),
       updatedAt: ordered[0]!.updatedAt,
       markedDone: false,
+      owner: null,
     };
   });
 }

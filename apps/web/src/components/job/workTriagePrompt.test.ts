@@ -26,6 +26,7 @@ const group = (status: WorkGroup["status"], reason: string): WorkGroup => ({
   slackLinks: [],
   conversation: null,
   markedDone: false,
+  owner: null,
 });
 
 describe("buildWorkTriagePrompt", () => {

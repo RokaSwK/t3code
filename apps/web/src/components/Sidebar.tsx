@@ -1538,14 +1538,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       />
     ) : null;
   const ownerBadge = thread.owner ? (
-    <span
-      role="img"
-      aria-label={`Owned by ${thread.owner.name}`}
-      title={`Owner: ${thread.owner.name}`}
-      className="inline-flex shrink-0 items-center"
-    >
-      <ThreadOwnerAvatar owner={thread.owner} className="size-3.5" />
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            role="img"
+            aria-label={`Owned by ${thread.owner.name}`}
+            className="inline-flex shrink-0 items-center"
+          />
+        }
+      >
+        <ThreadOwnerAvatar owner={thread.owner} className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipPopup side="top">Owner: {thread.owner.name}</TooltipPopup>
+    </Tooltip>
   ) : null;
   const terminalStatusIcon = terminalStatus ? (
     <span

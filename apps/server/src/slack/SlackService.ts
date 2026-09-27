@@ -50,6 +50,7 @@ import {
   type SlackSetReactionInput,
   type SlackSetDismissedInput,
   type SlackSetChannelExcludedInput,
+  type SlackSetConversationOwnerInput,
   type SlackChannel,
   type SlackPullRequest,
   type SlackState,
@@ -123,6 +124,7 @@ const CONNECTION_SECRET = "slack-connection";
 /** The app last signed in with, kept across sign-outs so reconnecting is one click. */
 const CLIENT_ID_SECRET = "slack-client-id";
 const DISMISSED_SECRET = "slack-dismissed-threads";
+const OWNERS_SECRET = "slack-conversation-owners";
 const EXCLUDED_CHANNELS_SECRET = "slack-excluded-channels";
 const INBOX_START_SECRET = "slack-inbox-start";
 /** `{ apiKey, orgId, name }` for Devin's API. */
@@ -184,6 +186,22 @@ const StoredDismissed = Schema.Struct({
 });
 const decodeStoredDismissed = Schema.decodeUnknownOption(Schema.fromJsonString(StoredDismissed));
 const encodeStoredDismissed = Schema.encodeSync(Schema.fromJsonString(StoredDismissed));
+const ConversationOwner = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  userId: Schema.String,
+  name: Schema.String,
+  avatarUrl: Schema.optional(Schema.String),
+});
+type ConversationOwner = typeof ConversationOwner.Type;
+const StoredOwners = Schema.Struct({
+  teamUrl: Schema.String,
+  userId: Schema.String,
+  owners: Schema.Array(ConversationOwner),
+});
+const decodeStoredOwners = Schema.decodeUnknownOption(Schema.fromJsonString(StoredOwners));
+const encodeStoredOwners = Schema.encodeSync(Schema.fromJsonString(StoredOwners));
+
 const StoredExcludedChannels = Schema.Struct({
   teamUrl: Schema.String,
   userId: Schema.String,
@@ -382,6 +400,9 @@ export class SlackService extends Context.Service<
     readonly setReaction: (input: SlackSetReactionInput) => Effect.Effect<void, SlackError>;
     readonly unfollow: (ref: SlackThreadRef) => Effect.Effect<void, SlackError>;
     readonly setDismissed: (input: SlackSetDismissedInput) => Effect.Effect<void, SlackError>;
+    readonly setConversationOwner: (
+      input: SlackSetConversationOwnerInput,
+    ) => Effect.Effect<void, SlackError>;
     readonly getChannels: Effect.Effect<ReadonlyArray<SlackChannel>, SlackError>;
     readonly setChannelExcluded: (
       input: SlackSetChannelExcludedInput,
@@ -483,6 +504,8 @@ const make = Effect.gen(function* () {
   >();
   let devinSessionsCheckedAt = 0;
   let dismissed: ReadonlyArray<SlackDismissedThread> = [];
+  let conversationOwners: ReadonlyArray<ConversationOwner> = [];
+  const ownerWrites = yield* Semaphore.make(1);
   let inboxStartedAtMs = 0;
   const dismissedWrites = yield* Semaphore.make(1);
   let excludedChannelIds = new Set<string>();
@@ -616,6 +639,7 @@ const make = Effect.gen(function* () {
         : [],
       conversations: connection ? visibleConversations().map(withPullRequestStates) : [],
       dismissed: connection ? dismissed : [],
+      conversationOwners: connection ? conversationOwners : [],
       excludedChannelIds: connection ? [...excludedChannelIds] : [],
       ...(connection && devinUser?.avatarUrl ? { devinAvatarUrl: devinUser.avatarUrl } : {}),
       devin: devin
@@ -782,6 +806,20 @@ const make = Effect.gen(function* () {
       stored.value.teamUrl === connection.teamUrl &&
       stored.value.userId === connection.userId
         ? stored.value.threads.filter((thread) => dismissedKept(thread, cutoff))
+        : [];
+  });
+
+  const loadOwners = Effect.gen(function* () {
+    const stored = yield* secrets.get(OWNERS_SECRET).pipe(
+      Effect.map(Option.flatMap((bytes) => decodeStoredOwners(new TextDecoder().decode(bytes)))),
+      Effect.orElseSucceed(() => Option.none<typeof StoredOwners.Type>()),
+    );
+    conversationOwners =
+      connection &&
+      Option.isSome(stored) &&
+      stored.value.teamUrl === connection.teamUrl &&
+      stored.value.userId === connection.userId
+        ? stored.value.owners
         : [];
   });
 
@@ -1628,6 +1666,7 @@ const make = Effect.gen(function* () {
       channels.clear();
       conversations.clear();
       dismissed = [];
+      conversationOwners = [];
       excludedChannelIds = new Set();
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
@@ -1688,6 +1727,7 @@ const make = Effect.gen(function* () {
     connection = next;
     yield* loadDismissed;
     yield* loadExcludedChannels;
+    yield* loadOwners;
     yield* loadInboxStart;
     connectionError = undefined;
     lastClientId = next.clientId;
@@ -2017,6 +2057,37 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const setConversationOwner = Effect.fn("slack.set_conversation_owner")(function* (
+    input: SlackSetConversationOwnerInput,
+  ) {
+    yield* ownerWrites.withPermit(
+      Effect.gen(function* () {
+        const current = connection;
+        if (!current) return yield* slackError("set_owner", "Slack is not connected.");
+        const others = conversationOwners.filter(
+          (entry) => !(entry.channelId === input.channelId && entry.ts === input.ts),
+        );
+        const next = input.owner
+          ? [...others, { channelId: input.channelId, ts: input.ts, ...input.owner }]
+          : others;
+        yield* secrets
+          .set(
+            OWNERS_SECRET,
+            new TextEncoder().encode(
+              encodeStoredOwners({
+                teamUrl: current.teamUrl,
+                userId: current.userId,
+                owners: next,
+              }),
+            ),
+          )
+          .pipe(Effect.mapError(() => slackError("set_owner", "Could not save the owner.")));
+        conversationOwners = next;
+        yield* publish;
+      }),
+    );
+  });
+
   const getChannels = Effect.gen(function* () {
     if (!connection) return yield* slackError("get_channels", "Slack is not connected.");
     return [...channels.values()]
@@ -2215,6 +2286,7 @@ const make = Effect.gen(function* () {
     connection = stored.value;
     yield* loadDismissed;
     yield* loadExcludedChannels;
+    yield* loadOwners;
     yield* loadInboxStart;
     lastClientId = stored.value.clientId;
     yield* startSync(true);
@@ -2234,6 +2306,7 @@ const make = Effect.gen(function* () {
     setReaction,
     unfollow,
     setDismissed,
+    setConversationOwner,
     getChannels,
     setChannelExcluded,
     listMembers,

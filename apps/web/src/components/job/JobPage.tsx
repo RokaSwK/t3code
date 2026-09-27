@@ -35,6 +35,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { ThreadOwnerAvatar } from "../ThreadOwnerDialog";
 import { ChannelExclusionsDialog } from "./ChannelExclusionsDialog";
 import { slackThreadDoneReason } from "./slackInbox";
 import { WorkAgentButton } from "./WorkAgentButton";
@@ -107,6 +108,22 @@ function ConversationSignals({
           isDraft={false}
           className="size-3.5"
         />
+      ) : null}
+      {group.owner ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                role="img"
+                aria-label={`Owned by ${group.owner.name}`}
+                className="inline-flex shrink-0"
+              />
+            }
+          >
+            <ThreadOwnerAvatar owner={{ kind: "slack", ...group.owner }} className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipPopup side="top">Owned by {group.owner.name}</TooltipPopup>
+        </Tooltip>
       ) : null}
     </>
   );
@@ -219,13 +236,15 @@ function useWorkList(slackState: SlackState | null) {
     (connection?.status === "authorizing" && connection.connectedAs !== undefined);
   const conversations = slackConnected ? slackState!.conversations : undefined;
   const dismissed = slackState?.dismissed;
+  const owners = slackState?.conversationOwners;
   const groups = useMemo(
     () =>
       buildWorkGroups(shells, {
         ...(conversations ? { conversations } : {}),
         ...(dismissed ? { dismissed } : {}),
+        ...(owners ? { owners } : {}),
       }),
-    [shells, conversations, dismissed],
+    [shells, conversations, dismissed, owners],
   );
   const includedProjects = useMemo(
     () => includedWorkProjects(projects, configs),
@@ -260,12 +279,15 @@ function useWorkList(slackState: SlackState | null) {
       if (dismissedKeys.has(key) || slackThreadDoneReason(thread) !== null) cleared.push(thread);
       else fresh.push(thread);
     }
+    // Handed to someone else: watched, never counted as yours to act on.
+    const yours = mine.filter((group) => group.owner === null);
     return {
       slackConnected,
       includedProjects,
-      needs: mine.filter((group) => group.status === "needs"),
-      working: mine.filter((group) => group.status === "working"),
-      waiting: mine.filter((group) => group.status === "waiting"),
+      needs: yours.filter((group) => group.status === "needs"),
+      working: yours.filter((group) => group.status === "working"),
+      waiting: yours.filter((group) => group.status === "waiting"),
+      watching: mine.filter((group) => group.owner !== null && group.status !== "done"),
       done: mine.filter((group) => group.status === "done"),
       fresh,
       cleared,
@@ -430,6 +452,7 @@ export function JobPage() {
   const [showCleared, setShowCleared] = useState(false);
   const [showAllNew, setShowAllNew] = useState(false);
   const [showOther, setShowOther] = useState(false);
+  const [showWatching, setShowWatching] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [managingChannels, setManagingChannels] = useState(false);
   const [choosingFolders, setChoosingFolders] = useState(false);
@@ -578,6 +601,28 @@ export function JobPage() {
                   {showCleared ? (
                     <NewThreadRows
                       threads={list.cleared}
+                      selectedId={selectedId}
+                      onSelect={setSelectedId}
+                    />
+                  ) : null}
+                </section>
+              ) : null}
+              {list.watching.length > 0 ? (
+                <section className="flex flex-col">
+                  <WorkGroupHeader
+                    label="Watching"
+                    count={list.watching.length}
+                    action={
+                      <ToggleButton
+                        open={showWatching}
+                        onToggle={() => setShowWatching(!showWatching)}
+                      />
+                    }
+                  />
+                  {showWatching ? (
+                    <ConversationRows
+                      devinAvatarUrl={state?.devinAvatarUrl}
+                      groups={list.watching}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
                     />

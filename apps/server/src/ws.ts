@@ -3646,6 +3646,12 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.slackListMembers, slackService.listMembers, {
             "rpc.aggregate": "slack",
           }),
+        [WS_METHODS.slackSetConversationOwner]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.slackSetConversationOwner,
+            slackService.setConversationOwner(input),
+            { "rpc.aggregate": "slack" },
+          ),
         [WS_METHODS.devinConnect]: (input) =>
           observeRpcEffect(WS_METHODS.devinConnect, slackService.devinConnect(input), {
             "rpc.aggregate": "slack",

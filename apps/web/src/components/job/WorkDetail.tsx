@@ -29,6 +29,7 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { requestConversationOwner, ThreadOwnerAvatar } from "../ThreadOwnerDialog";
 import { SlackConversationView } from "./SlackConversationView";
 import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 import type { WorkGroup, WorkPullRequest, WorkThread } from "./workGroups";
@@ -237,6 +238,9 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
   const setDismissed = useAtomCommand(slackEnvironment.setDismissed, { reportFailure: false });
   const setReaction = useAtomCommand(slackEnvironment.setReaction, { reportFailure: false });
   const unfollow = useAtomCommand(slackEnvironment.unfollow, { reportFailure: false });
+  const setOwner = useAtomCommand(slackEnvironment.setConversationOwner, {
+    reportFailure: false,
+  });
   const [busy, setBusy] = useState(false);
   const ref = { channelId: thread.channelId, ts: thread.ts };
   const run = (action: () => Promise<{ readonly _tag: string }>, failure: string) => {
@@ -263,6 +267,11 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
         "Could not follow the thread",
       ),
     unfollow: () => run(() => unfollow({ environmentId, input: ref }), "Could not unfollow"),
+    takeBack: () =>
+      run(
+        () => setOwner({ environmentId, input: { ...ref, owner: null } }),
+        "Could not take the conversation back",
+      ),
   };
 }
 
@@ -304,25 +313,50 @@ function SlackDetail({
         }
       >
         <OpenInSlackButton url={thread.permalink} />
-        {thread.followed ? (
-          <Menu>
-            <MenuTrigger
-              render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}
+        <Menu>
+          <MenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}>
+            <EllipsisIcon />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem
+              disabled={actions.busy}
+              onClick={() => {
+                // A conversation handed off is still watched, so it has to be followed.
+                if (!mine) actions.follow();
+                void requestConversationOwner(environmentId, {
+                  channelId: thread.channelId,
+                  ts: thread.ts,
+                });
+              }}
             >
-              <EllipsisIcon />
-            </MenuTrigger>
-            <MenuPopup align="end">
+              Assign owner…
+            </MenuItem>
+            {thread.followed ? (
               <MenuItem disabled={actions.busy} onClick={actions.unfollow}>
                 Unfollow
               </MenuItem>
-            </MenuPopup>
-          </Menu>
-        ) : null}
+            ) : null}
+          </MenuPopup>
+        </Menu>
       </PanelHeader>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-5 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs">{status}</div>
+            {group?.owner ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <ThreadOwnerAvatar owner={{ kind: "slack", ...group.owner }} className="size-4" />
+                <span className="truncate">Owned by {group.owner.name}</span>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={actions.busy}
+                  onClick={actions.takeBack}
+                >
+                  Take back
+                </Button>
+              </span>
+            ) : null}
             {mine ? null : (
               <Button size="xs" variant="outline" disabled={actions.busy} onClick={actions.follow}>
                 <EyeIcon />

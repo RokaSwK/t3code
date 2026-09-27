@@ -823,4 +823,51 @@ describe("SlackService", () => {
       ),
     );
   });
+
+  it.live("keeps a conversation's owner across restarts until it is taken back", () => {
+    const secrets = new Map<string, Uint8Array>([
+      [
+        "slack-connection",
+        new TextEncoder().encode(
+          JSON.stringify({
+            clientId: "123.456",
+            accessToken: "xoxp-test",
+            teamName: "Acme",
+            teamUrl: "https://acme.slack.com/",
+            userId: "U1",
+            userName: "ada",
+          }),
+        ),
+      ],
+    ]);
+    const layer = SlackService.layer.pipe(
+      Layer.provide(fakeSlack([], new Set())),
+      Layer.provide(memorySecrets(secrets)),
+      Layer.provide(NodeServices.layer),
+      Layer.provide(fakeGitHub),
+    );
+    const ref = { channelId: "C2", ts: "1700000000.000100" };
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const slack = yield* SlackService.SlackService;
+        yield* slack.setConversationOwner({
+          ...ref,
+          owner: { userId: "U2", name: "Rick", avatarUrl: "https://a.test/rick.png" },
+        });
+        const owned = yield* waitForState((state) => state.conversationOwners.length === 1);
+        assert.deepStrictEqual(owned.conversationOwners, [
+          { ...ref, userId: "U2", name: "Rick", avatarUrl: "https://a.test/rick.png" },
+        ]);
+      }).pipe(Effect.provide(layer));
+
+      yield* Effect.gen(function* () {
+        const slack = yield* SlackService.SlackService;
+        const restored = yield* waitForState((state) => state.conversationOwners.length === 1);
+        assert.strictEqual(restored.conversationOwners[0]?.name, "Rick");
+        yield* slack.setConversationOwner({ ...ref, owner: null });
+        const back = yield* waitForState((state) => state.conversationOwners.length === 0);
+        assert.deepStrictEqual(back.conversationOwners, []);
+      }).pipe(Effect.provide(layer));
+    });
+  });
 });

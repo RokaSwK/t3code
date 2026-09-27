@@ -1,5 +1,11 @@
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { ScopedThreadRef, SlackMember, ThreadOwner } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ScopedThreadRef,
+  SlackMember,
+  SlackThreadRef,
+  ThreadOwner,
+} from "@t3tools/contracts";
 import { CheckIcon, UserIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
@@ -13,13 +19,39 @@ import { Command, CommandInput, CommandItem, CommandList } from "./ui/command";
 import { Dialog, DialogDescription, DialogHeader, DialogPopup, DialogTitle } from "./ui/dialog";
 import { toastManager } from "./ui/toast";
 
-type Request = { readonly threadRef: ScopedThreadRef; readonly resolve: () => void };
+/** What gets an owner: a T3 thread, or a Slack conversation on the Work page. */
+type OwnerTarget =
+  | { readonly kind: "thread"; readonly threadRef: ScopedThreadRef }
+  | {
+      readonly kind: "conversation";
+      readonly environmentId: EnvironmentId;
+      readonly conversation: SlackThreadRef;
+    };
+type Request = { readonly target: OwnerTarget; readonly resolve: () => void };
 const useRequest = create<{ request: Request | null }>(() => ({ request: null }));
+
+function requestOwner(target: OwnerTarget): Promise<void> {
+  useRequest.getState().request?.resolve();
+  return new Promise((resolve) => useRequest.setState({ request: { target, resolve } }));
+}
 
 /** Opens the owner picker for a thread. Resolves when it closes, saved or not. */
 export function requestThreadOwner(threadRef: ScopedThreadRef): Promise<void> {
-  useRequest.getState().request?.resolve();
-  return new Promise((resolve) => useRequest.setState({ request: { threadRef, resolve } }));
+  return requestOwner({ kind: "thread", threadRef });
+}
+
+/** Opens the owner picker for a Slack conversation; handing it off moves it to Watching. */
+export function requestConversationOwner(
+  environmentId: EnvironmentId,
+  conversation: SlackThreadRef,
+): Promise<void> {
+  return requestOwner({ kind: "conversation", environmentId, conversation });
+}
+
+function targetKey(target: OwnerTarget): string {
+  return target.kind === "thread"
+    ? `thread:${target.threadRef.environmentId}:${target.threadRef.threadId}`
+    : `conversation:${target.environmentId}:${target.conversation.channelId}:${target.conversation.ts}`;
 }
 
 function finish() {
@@ -32,10 +64,7 @@ export function ThreadOwnerDialogHost() {
   const request = useRequest((state) => state.request);
   useEffect(() => () => finish(), []);
   return request ? (
-    <ThreadOwnerDialog
-      key={`${request.threadRef.environmentId}:${request.threadRef.threadId}`}
-      threadRef={request.threadRef}
-    />
+    <ThreadOwnerDialog key={targetKey(request.target)} target={request.target} />
   ) : null;
 }
 
@@ -81,13 +110,18 @@ function toOwner(member: SlackMember): ThreadOwner {
   };
 }
 
-/** "You" plus the connected workspace's members; picking one saves it to the thread. */
-function ThreadOwnerDialog({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
-  const thread = useThreadShell(threadRef);
-  const slack = useSlackState(threadRef.environmentId);
+/** "You" plus the connected workspace's members; picking one saves it to the target. */
+function ThreadOwnerDialog({ target }: { readonly target: OwnerTarget }) {
+  const environmentId =
+    target.kind === "thread" ? target.threadRef.environmentId : target.environmentId;
+  const thread = useThreadShell(target.kind === "thread" ? target.threadRef : null);
+  const slack = useSlackState(environmentId);
   const connection = slack?.connection.status === "connected" ? slack.connection : null;
   const listMembers = useAtomCommand(slackEnvironment.listMembers, { reportFailure: false });
   const update = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
+  const setConversationOwner = useAtomCommand(slackEnvironment.setConversationOwner, {
+    reportFailure: false,
+  });
   const [members, setMembers] = useState<MembersState>({ status: "loading" });
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
@@ -95,7 +129,7 @@ function ThreadOwnerDialog({ threadRef }: { readonly threadRef: ScopedThreadRef 
   useEffect(() => {
     if (!connected) return;
     let cancelled = false;
-    void listMembers({ environmentId: threadRef.environmentId, input: {} }).then((result) => {
+    void listMembers({ environmentId, input: {} }).then((result) => {
       if (cancelled) return;
       if (result._tag === "Success") {
         setMembers({ status: "ready", members: result.value });
@@ -110,9 +144,17 @@ function ThreadOwnerDialog({ threadRef }: { readonly threadRef: ScopedThreadRef 
     return () => {
       cancelled = true;
     };
-  }, [connected, listMembers, threadRef.environmentId]);
+  }, [connected, listMembers, environmentId]);
 
-  const currentOwner = thread?.owner ?? null;
+  const conversationOwner =
+    target.kind === "conversation"
+      ? (slack?.conversationOwners.find(
+          (entry) =>
+            entry.channelId === target.conversation.channelId &&
+            entry.ts === target.conversation.ts,
+        ) ?? null)
+      : null;
+  const currentOwner = target.kind === "thread" ? (thread?.owner ?? null) : conversationOwner;
   const search = query.trim().toLocaleLowerCase();
   const showYou = search.length === 0 || "you".includes(search) || "me".includes(search);
   const candidates =
@@ -127,10 +169,25 @@ function ThreadOwnerDialog({ threadRef }: { readonly threadRef: ScopedThreadRef 
   const assign = async (owner: ThreadOwner | null) => {
     if (saving) return;
     setSaving(true);
-    const result = await update({
-      environmentId: threadRef.environmentId,
-      input: { threadId: threadRef.threadId, owner },
-    });
+    const result =
+      target.kind === "thread"
+        ? await update({
+            environmentId,
+            input: { threadId: target.threadRef.threadId, owner },
+          })
+        : await setConversationOwner({
+            environmentId,
+            input: {
+              ...target.conversation,
+              owner: owner
+                ? {
+                    userId: owner.userId,
+                    name: owner.name,
+                    ...(owner.avatarUrl ? { avatarUrl: owner.avatarUrl } : {}),
+                  }
+                : null,
+            },
+          });
     setSaving(false);
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
@@ -153,9 +210,13 @@ function ThreadOwnerDialog({ threadRef }: { readonly threadRef: ScopedThreadRef 
     >
       <DialogPopup className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Thread owner</DialogTitle>
+          <DialogTitle>
+            {target.kind === "thread" ? "Thread owner" : "Conversation owner"}
+          </DialogTitle>
           <DialogDescription>
-            Who this thread is for. You own the threads you create unless you hand one over.
+            {target.kind === "thread"
+              ? "Who this thread is for. You own the threads you create unless you hand one over."
+              : "Hand this conversation to someone. It moves to Watching on the Work page, where you still see its updates."}
           </DialogDescription>
         </DialogHeader>
         <Command mode="none" value={query} onValueChange={setQuery} aria-label="Choose an owner">

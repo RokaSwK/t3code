@@ -28,6 +28,11 @@ linked to the Slack conversation, so it shows on the conversation here, and the 
 panel opens the conversation beside your work. **Unfollow** in the **…** menu removes your 👀
 reactions.
 
+To hand a conversation to someone, choose **Assign owner…** from its **…** menu and pick a
+Slack member. It moves to **Watching**, where you still see its updates and status, but it no
+longer counts in **Needs me**, **In progress**, or **Waiting**. Choose **Take back** to make it
+yours again.
+
 T3 work that is not tied to one of your conversations is under **Other work**. Choose **Choose
 folders…** from the page's **…** menu to pick which project folders it comes from; this choice is
 saved on each connected server. Link a PR from a T3 thread using **Link pull request** in the
@@ -36,6 +41,18 @@ command palette; created PRs link automatically.
 Choose **Review with agent** to open a new T3 draft with the current work snapshot. Review and
 send the prompt when you want a triage report. The agent is asked to investigate, identify
 blockers, and suggest next actions without changing sources or sending messages.
+
+## Codex and Claude apps
+
+Sessions from the Codex and Claude apps, and their command-line tools, arrive as T3 threads on
+their own every few minutes, with the name the app gave them. T3 Code also adds a project for
+each repository those apps worked in during the last 30 days. It only adds threads: one already
+here is never changed, even if you keep going in the app. Continue an imported thread here to
+pick up the same session. Imported threads show the app's logo in the sidebar and the thread
+header.
+
+To import right away, choose **Import threads from Codex and Claude** in the command palette or
+**Import now** in **Settings → Work**, where you can also turn automatic importing off.
 
 ## Devin
 

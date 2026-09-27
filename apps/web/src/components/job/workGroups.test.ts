@@ -244,3 +244,21 @@ describe("buildWorkGroups with Slack conversations", () => {
     ]);
   });
 });
+
+describe("buildWorkGroups with conversation owners", () => {
+  it("carries who a conversation was handed to", () => {
+    const [group] = buildWorkGroups([], {
+      conversations: [conversation()],
+      owners: [{ channelId: "C1", ts: conversation().ts, userId: "U2", name: "Rick" }],
+      now: nowMs,
+    });
+    expect(group?.owner).toEqual({
+      channelId: "C1",
+      ts: conversation().ts,
+      userId: "U2",
+      name: "Rick",
+    });
+    const [mine] = buildWorkGroups([], { conversations: [conversation()], now: nowMs });
+    expect(mine?.owner).toBeNull();
+  });
+});
