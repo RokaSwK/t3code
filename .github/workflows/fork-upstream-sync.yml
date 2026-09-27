@@ -31,6 +31,8 @@ jobs:
     timeout-minutes: 60
     env:
       GH_TOKEN: ${{ github.token }}
+      # Adding the upstream remote makes gh otherwise prefer the parent repository.
+      GH_REPO: ${{ github.repository }}
       UPSTREAM: pingdotgg/t3code
     steps:
       - uses: actions/checkout@v4
