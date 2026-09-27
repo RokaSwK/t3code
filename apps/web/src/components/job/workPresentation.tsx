@@ -10,6 +10,8 @@ import { Separator } from "../ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { WorkStatus } from "./workGroups";
 
+export { slackMessageSummary } from "@t3tools/shared/work";
+
 /** The sidebar's thread status colors, so a status reads the same on every surface. */
 export const WORK_STATUS_PRESENTATION: Record<
   WorkStatus,
@@ -129,25 +131,6 @@ export function T3Logo({ className }: { readonly className?: string }) {
       <T3Wordmark aria-hidden className="h-2 w-auto" />
     </span>
   );
-}
-
-/** One line of plain text from a Slack message, for a row title. */
-export function slackMessageSummary(markdown: string): string {
-  const text = markdown
-    .replace(/```[\s\S]*?```/g, " ")
-    // Devin ends its messages with icon links to the session and its settings.
-    .replace(/\[\[[^\]]*\]\]\([^)]*\)/g, " ")
-    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
-    // Devin's automations post for you as "@you: request".
-    .replace(/^\s*\*{0,2}@[^:*\n]{1,40}\*{0,2}:\s*/, "")
-    // A bare link says little in a title; the words around it say more.
-    .replace(/<?https?:\/\/\S+>?/g, " ")
-    // Slack shows some links by their address without the scheme.
-    .replace(/(?:^|\s)(?:www\.)?[\w-]+(?:\.[\w-]+)+\/\S*/g, " ")
-    .replace(/[*_~`>#]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return text || "Shared a link";
 }
 
 /** Section heading in the list, the pull request list's shape. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { slackMessageSummary } from "./workPresentation";
+import { slackMessageSummary } from "./work.ts";
 
 describe("slackMessageSummary", () => {
   it("drops Devin's session links and the automation's on-your-behalf mention", () => {

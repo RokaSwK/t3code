@@ -15,6 +15,7 @@ import {
 import {
   buildWorkGroups,
   includedWorkProjects,
+  slackMessageSummary,
   type WorkGroup,
   type WorkThread,
 } from "@t3tools/shared/work";
@@ -66,7 +67,7 @@ function workItemOf(group: WorkGroup): WorkItem {
             permalink: conversation.permalink,
             channel: conversation.channelName,
             author: conversation.authorName,
-            text: cut(oneLine(conversation.markdown), WORK_TEXT_CHARS),
+            text: cut(slackMessageSummary(conversation.markdown), WORK_TEXT_CHARS),
             ...(conversation.lastReply ? { lastReplyBy: conversation.lastReply.authorName } : {}),
             ...(group.owner ? { owner: group.owner.name } : {}),
             ...(group.waitingOn ? { waitingOn: group.waitingOn.name } : {}),
@@ -176,7 +177,7 @@ export function buildWorkOverview(input: {
             permalink: thread.permalink,
             channel: thread.channelName,
             author: thread.authorName,
-            text: cut(oneLine(thread.markdown), WORK_TEXT_CHARS),
+            text: cut(slackMessageSummary(thread.markdown), WORK_TEXT_CHARS),
             replyCount: thread.replyCount,
           }))
       : [];
@@ -201,7 +202,14 @@ const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
-  const requireWork = McpInvocationContext.requireMcpCapability("work");
+  // Says how to get access, where the shared capability error only says it is missing.
+  const requireWork = McpInvocationContext.requireMcpCapability("work").pipe(
+    Effect.mapError(() =>
+      fail(
+        "This thread has no Work access. Use the Work agent (the Work agent button on the Work page), or choose this thread's folder in Settings → Work → Work agent; it applies to threads started after that.",
+      ),
+    ),
+  );
 
   const callerThread = Effect.gen(function* () {
     const scope = yield* McpInvocationContext.McpInvocationContext;
