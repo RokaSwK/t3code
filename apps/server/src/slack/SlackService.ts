@@ -51,6 +51,7 @@ import {
   type SlackSetDismissedInput,
   type SlackSetChannelExcludedInput,
   type SlackSetConversationOwnerInput,
+  type SlackSetConversationWaitInput,
   type SlackChannel,
   type SlackPullRequest,
   type SlackState,
@@ -125,6 +126,7 @@ const CONNECTION_SECRET = "slack-connection";
 const CLIENT_ID_SECRET = "slack-client-id";
 const DISMISSED_SECRET = "slack-dismissed-threads";
 const OWNERS_SECRET = "slack-conversation-owners";
+const WAITS_SECRET = "slack-conversation-waits";
 const EXCLUDED_CHANNELS_SECRET = "slack-excluded-channels";
 const INBOX_START_SECRET = "slack-inbox-start";
 /** `{ apiKey, orgId, name }` for Devin's API. */
@@ -201,6 +203,19 @@ const StoredOwners = Schema.Struct({
 });
 const decodeStoredOwners = Schema.decodeUnknownOption(Schema.fromJsonString(StoredOwners));
 const encodeStoredOwners = Schema.encodeSync(Schema.fromJsonString(StoredOwners));
+
+const ConversationWait = Schema.Struct({
+  ...ConversationOwner.fields,
+  at: Schema.Number,
+});
+type ConversationWait = typeof ConversationWait.Type;
+const StoredWaits = Schema.Struct({
+  teamUrl: Schema.String,
+  userId: Schema.String,
+  waits: Schema.Array(ConversationWait),
+});
+const decodeStoredWaits = Schema.decodeUnknownOption(Schema.fromJsonString(StoredWaits));
+const encodeStoredWaits = Schema.encodeSync(Schema.fromJsonString(StoredWaits));
 
 const StoredExcludedChannels = Schema.Struct({
   teamUrl: Schema.String,
@@ -383,6 +398,8 @@ export class SlackService extends Context.Service<
   {
     /** The current state followed by every change. */
     readonly state: Stream.Stream<SlackState>;
+    /** The state as it is now, for server-side readers such as the Work tools. */
+    readonly current: Effect.Effect<SlackState>;
     readonly connect: (input: SlackConnectInput) => Effect.Effect<SlackConnection, SlackError>;
     readonly completeConnect: (
       input: SlackCompleteConnectInput,
@@ -402,6 +419,9 @@ export class SlackService extends Context.Service<
     readonly setDismissed: (input: SlackSetDismissedInput) => Effect.Effect<void, SlackError>;
     readonly setConversationOwner: (
       input: SlackSetConversationOwnerInput,
+    ) => Effect.Effect<void, SlackError>;
+    readonly setConversationWait: (
+      input: SlackSetConversationWaitInput,
     ) => Effect.Effect<void, SlackError>;
     readonly getChannels: Effect.Effect<ReadonlyArray<SlackChannel>, SlackError>;
     readonly setChannelExcluded: (
@@ -505,6 +525,7 @@ const make = Effect.gen(function* () {
   let devinSessionsCheckedAt = 0;
   let dismissed: ReadonlyArray<SlackDismissedThread> = [];
   let conversationOwners: ReadonlyArray<ConversationOwner> = [];
+  let conversationWaits: ReadonlyArray<ConversationWait> = [];
   const ownerWrites = yield* Semaphore.make(1);
   let inboxStartedAtMs = 0;
   const dismissedWrites = yield* Semaphore.make(1);
@@ -640,6 +661,7 @@ const make = Effect.gen(function* () {
       conversations: connection ? visibleConversations().map(withPullRequestStates) : [],
       dismissed: connection ? dismissed : [],
       conversationOwners: connection ? conversationOwners : [],
+      conversationWaits: connection ? conversationWaits : [],
       excludedChannelIds: connection ? [...excludedChannelIds] : [],
       ...(connection && devinUser?.avatarUrl ? { devinAvatarUrl: devinUser.avatarUrl } : {}),
       devin: devin
@@ -820,6 +842,20 @@ const make = Effect.gen(function* () {
       stored.value.teamUrl === connection.teamUrl &&
       stored.value.userId === connection.userId
         ? stored.value.owners
+        : [];
+  });
+
+  const loadWaits = Effect.gen(function* () {
+    const stored = yield* secrets.get(WAITS_SECRET).pipe(
+      Effect.map(Option.flatMap((bytes) => decodeStoredWaits(new TextDecoder().decode(bytes)))),
+      Effect.orElseSucceed(() => Option.none<typeof StoredWaits.Type>()),
+    );
+    conversationWaits =
+      connection &&
+      Option.isSome(stored) &&
+      stored.value.teamUrl === connection.teamUrl &&
+      stored.value.userId === connection.userId
+        ? stored.value.waits
         : [];
   });
 
@@ -1667,6 +1703,7 @@ const make = Effect.gen(function* () {
       conversations.clear();
       dismissed = [];
       conversationOwners = [];
+      conversationWaits = [];
       excludedChannelIds = new Set();
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
@@ -1728,6 +1765,7 @@ const make = Effect.gen(function* () {
     yield* loadDismissed;
     yield* loadExcludedChannels;
     yield* loadOwners;
+    yield* loadWaits;
     yield* loadInboxStart;
     connectionError = undefined;
     lastClientId = next.clientId;
@@ -2088,6 +2126,41 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const setConversationWait = Effect.fn("slack.set_conversation_wait")(function* (
+    input: SlackSetConversationWaitInput,
+  ) {
+    yield* ownerWrites.withPermit(
+      Effect.gen(function* () {
+        const current = connection;
+        if (!current) return yield* slackError("set_wait", "Slack is not connected.");
+        const others = conversationWaits.filter(
+          (entry) => !(entry.channelId === input.channelId && entry.ts === input.ts),
+        );
+        const next = input.member
+          ? [
+              ...others,
+              {
+                channelId: input.channelId,
+                ts: input.ts,
+                ...input.member,
+                at: yield* Clock.currentTimeMillis,
+              },
+            ]
+          : others;
+        yield* secrets
+          .set(
+            WAITS_SECRET,
+            new TextEncoder().encode(
+              encodeStoredWaits({ teamUrl: current.teamUrl, userId: current.userId, waits: next }),
+            ),
+          )
+          .pipe(Effect.mapError(() => slackError("set_wait", "Could not save who you wait on.")));
+        conversationWaits = next;
+        yield* publish;
+      }),
+    );
+  });
+
   const getChannels = Effect.gen(function* () {
     if (!connection) return yield* slackError("get_channels", "Slack is not connected.");
     return [...channels.values()]
@@ -2287,6 +2360,7 @@ const make = Effect.gen(function* () {
     yield* loadDismissed;
     yield* loadExcludedChannels;
     yield* loadOwners;
+    yield* loadWaits;
     yield* loadInboxStart;
     lastClientId = stored.value.clientId;
     yield* startSync(true);
@@ -2295,6 +2369,7 @@ const make = Effect.gen(function* () {
 
   return SlackService.of({
     state: SubscriptionRef.changes(stateRef),
+    current: SubscriptionRef.get(stateRef),
     connect,
     completeConnect,
     cancelConnect,
@@ -2307,6 +2382,7 @@ const make = Effect.gen(function* () {
     unfollow,
     setDismissed,
     setConversationOwner,
+    setConversationWait,
     getChannels,
     setChannelExcluded,
     listMembers,

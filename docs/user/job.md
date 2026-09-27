@@ -23,9 +23,11 @@ it links to is merged or closed, or after three quiet days when you or Devin had
 nobody replied. Choose **Done** to mark any other conversation yourself; a new reply from someone
 else brings it back. **Not done** undoes your own mark.
 
-Choose **Start thread** to work on a conversation in T3. The new thread opens as a draft already
-linked to the Slack conversation, so it shows on the conversation here, and the **Slack threads**
-panel opens the conversation beside your work. **Unfollow** in the **…** menu removes your 👀
+Choose **Start thread** to work on a conversation in T3. The new thread opens as a draft in a new
+worktree, already linked to the Slack conversation, with the message quoted in the composer; its
+agent can read the whole conversation. It shows on the conversation here, and the **Slack
+threads** panel opens the conversation beside your work. When you are done, ⌘-click **Settle** on
+the thread in the sidebar to also mark its Slack conversation done and react ✅ in Slack. **Unfollow** in the **…** menu removes your 👀
 reactions.
 
 To hand a conversation to someone, choose **Assign owner…** from its **…** menu and pick a
@@ -38,9 +40,23 @@ folders…** from the page's **…** menu to pick which project folders it comes
 saved on each connected server. Link a PR from a T3 thread using **Link pull request** in the
 command palette; created PRs link automatically.
 
-Choose **Review with agent** to open a new T3 draft with the current work snapshot. Review and
-send the prompt when you want a triage report. The agent is asked to investigate, identify
-blockers, and suggest next actions without changing sources or sending messages.
+When a conversation is yours but blocked on someone, such as a reviewer, choose **Waiting on…**
+from its **…** menu. It shows as **Waiting** until someone else replies, then comes back to
+**Needs me**. A conversation with an open pull request where you or Devin had the last word also
+counts as waiting for review.
+
+## Work agent
+
+The Work agent is a T3 thread that sees your work the way this page does and can act on it. It
+reads your conversations, Devin sessions, pull requests, and other T3 threads; it can follow,
+mark done, hand off, or mark waiting; and it can start or message other T3 threads, asking you
+first. It does not post in Slack.
+
+Choose **Work agent** at the top of the page. The first time, it starts a thread in your Work
+folder with a triage prompt ready to send; after that it opens the same thread with a prompt to
+triage again. Choose its folder in **Settings → Work → Work agent**; threads in that folder get
+the Work tools, and threads it starts elsewhere do not. Turn on **Tell the Work agent about new
+items** to have it look into new **Needs me** items as they arrive, at most every 15 minutes.
 
 ## Codex and Claude apps
 

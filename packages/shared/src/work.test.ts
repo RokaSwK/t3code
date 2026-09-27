@@ -8,7 +8,7 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildWorkGroups, WORK_QUIET_MS, type WorkThread } from "./workGroups";
+import { buildWorkGroups, WORK_QUIET_MS, type WorkThread } from "./work.ts";
 
 const now = "2026-09-26T20:00:00.000Z";
 
@@ -63,21 +63,24 @@ function pr(changes: Partial<ThreadPullRequestLink> = {}): ThreadPullRequestLink
 
 describe("buildWorkGroups", () => {
   it("groups threads by shared PR and uses the latest synced status", () => {
-    const groups = buildWorkGroups([
-      thread("first", { pullRequests: [pr({ snapshot: snapshot({ checksState: "pending" }) })] }),
-      thread("second", {
-        environmentId: EnvironmentId.make("env-2"),
-        backgroundLiveness: "working",
-        pullRequests: [
-          pr({
-            snapshot: snapshot({
-              checksState: "failing",
-              syncedAt: "2026-09-26T20:01:00.000Z",
+    const groups = buildWorkGroups(
+      [
+        thread("first", { pullRequests: [pr({ snapshot: snapshot({ checksState: "pending" }) })] }),
+        thread("second", {
+          environmentId: EnvironmentId.make("env-2"),
+          backgroundLiveness: "working",
+          pullRequests: [
+            pr({
+              snapshot: snapshot({
+                checksState: "failing",
+                syncedAt: "2026-09-26T20:01:00.000Z",
+              }),
             }),
-          }),
-        ],
-      }),
-    ]);
+          ],
+        }),
+      ],
+      { now: Date.parse(now) },
+    );
 
     expect(groups).toHaveLength(1);
     expect(groups[0]?.threads).toHaveLength(2);
@@ -88,10 +91,13 @@ describe("buildWorkGroups", () => {
 
   it("groups threads by a shared Slack conversation and prioritizes agent input", () => {
     const url = "https://example.slack.com/archives/C123/p1727380800000000";
-    const groups = buildWorkGroups([
-      thread("first", { linkedSlackThreads: [url] }),
-      thread("second", { linkedSlackThreads: [url], hasPendingUserInput: true }),
-    ]);
+    const groups = buildWorkGroups(
+      [
+        thread("first", { linkedSlackThreads: [url] }),
+        thread("second", { linkedSlackThreads: [url], hasPendingUserInput: true }),
+      ],
+      { now: Date.parse(now) },
+    );
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
@@ -102,26 +108,34 @@ describe("buildWorkGroups", () => {
   });
 
   it("shows pending PR checks as waiting and excludes tombstoned links", () => {
-    const groups = buildWorkGroups([
-      thread("waiting", { pullRequests: [pr({ snapshot: snapshot({ checksState: "pending" }) })] }),
-      thread("hidden", {
-        archivedAt: now,
-        pullRequests: [pr({ source: "stack-dismissed" })],
-      }),
-    ]);
+    const groups = buildWorkGroups(
+      [
+        thread("waiting", {
+          pullRequests: [pr({ snapshot: snapshot({ checksState: "pending" }) })],
+        }),
+        thread("hidden", {
+          archivedAt: now,
+          pullRequests: [pr({ source: "stack-dismissed" })],
+        }),
+      ],
+      { now: Date.parse(now) },
+    );
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ status: "waiting", reason: "PR checks running" });
   });
 
   it("keeps settled linked work visible as done", () => {
-    const groups = buildWorkGroups([
-      thread("done", {
-        archivedAt: now,
-        settledAt: now,
-        pullRequests: [pr({ snapshot: snapshot({ state: "merged" }) })],
-      }),
-    ]);
+    const groups = buildWorkGroups(
+      [
+        thread("done", {
+          archivedAt: now,
+          settledAt: now,
+          pullRequests: [pr({ snapshot: snapshot({ state: "merged" }) })],
+        }),
+      ],
+      { now: Date.parse(now) },
+    );
 
     expect(groups[0]).toMatchObject({ status: "done", reason: "Work completed" });
   });
@@ -156,8 +170,11 @@ const devinSession = (state?: "working" | "waiting" | "finished") => ({
 });
 
 describe("buildWorkGroups with Slack conversations", () => {
-  const status = (value: SlackThread, extra: Parameters<typeof buildWorkGroups>[1] = {}) => {
-    const [group] = buildWorkGroups([], { conversations: [value], now: nowMs, ...extra });
+  const status = (
+    value: SlackThread,
+    extra: Omit<Parameters<typeof buildWorkGroups>[1], "now"> = {},
+  ) => {
+    const [group] = buildWorkGroups([], { ...extra, conversations: [value], now: nowMs });
     return [group?.status, group?.reason];
   };
 
@@ -260,5 +277,51 @@ describe("buildWorkGroups with conversation owners", () => {
     });
     const [mine] = buildWorkGroups([], { conversations: [conversation()], now: nowMs });
     expect(mine?.owner).toBeNull();
+  });
+});
+
+describe("buildWorkGroups handoffs", () => {
+  const replyAt = (by: "me" | "devin" | "other", ms: number) => ({
+    lastReply: { by, authorName: by === "other" ? "Rick" : "x", ts: slackTs(ms) },
+  });
+  const status = (value: SlackThread, waits?: Parameters<typeof buildWorkGroups>[1]["waits"]) => {
+    const [group] = buildWorkGroups([], {
+      conversations: [value],
+      ...(waits ? { waits } : {}),
+      now: nowMs,
+    });
+    return [group?.status, group?.reason];
+  };
+
+  it("waits on the person you are waiting on until someone replies after that", () => {
+    const at = nowMs - 60 * 60_000;
+    const waits = [{ channelId: "C1", ts: conversation().ts, userId: "U2", name: "Rick", at }];
+    expect(status(conversation(replyAt("other", at - 60_000)), waits)).toEqual([
+      "waiting",
+      "Waiting on Rick",
+    ]);
+    expect(status(conversation(replyAt("other", at + 60_000)), waits)).toEqual([
+      "needs",
+      "Rick replied",
+    ]);
+  });
+
+  it("treats an open PR after your or Devin's last word as waiting for review", () => {
+    const pullRequests = [
+      {
+        url: "https://github.com/owner/repo/pull/708",
+        repository: "owner/repo",
+        number: 708,
+        state: "open" as const,
+      },
+    ];
+    expect(status(conversation({ ...replyAt("devin", nowMs - 60_000), pullRequests }))).toEqual([
+      "waiting",
+      "PR open, waiting for review",
+    ]);
+    expect(status(conversation({ ...replyAt("other", nowMs - 60_000), pullRequests }))).toEqual([
+      "needs",
+      "Rick replied",
+    ]);
   });
 });

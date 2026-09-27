@@ -264,6 +264,20 @@ export const SlackState = Schema.Struct({
       avatarUrl: Schema.optional(Schema.String),
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /**
+   * Conversations that are yours but blocked on someone, such as a reviewer. They wait until
+   * someone else replies after `at` (ms).
+   */
+  conversationWaits: Schema.Array(
+    Schema.Struct({
+      channelId: Schema.String,
+      ts: Schema.String,
+      userId: Schema.String,
+      name: Schema.String,
+      avatarUrl: Schema.optional(Schema.String),
+      at: Schema.Number,
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /** Devin's logo, from its Slack profile, for marking its sessions. */
   devinAvatarUrl: Schema.optional(Schema.String),
   devin: DevinConnection.pipe(
@@ -346,6 +360,20 @@ export const SlackSetConversationOwnerInput = Schema.Struct({
   ),
 });
 export type SlackSetConversationOwnerInput = typeof SlackSetConversationOwnerInput.Type;
+
+/** Marks a conversation as waiting on a workspace member, or clears it with `member: null`. */
+export const SlackSetConversationWaitInput = Schema.Struct({
+  channelId: Schema.String,
+  ts: Schema.String,
+  member: Schema.NullOr(
+    Schema.Struct({
+      userId: Schema.String,
+      name: Schema.String,
+      avatarUrl: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type SlackSetConversationWaitInput = typeof SlackSetConversationWaitInput.Type;
 
 export const SlackSetChannelExcludedInput = Schema.Struct({
   channelId: Schema.String,

@@ -273,6 +273,7 @@ import {
   DevinConnectInput,
   DevinConnection,
   SlackSetConversationOwnerInput,
+  SlackSetConversationWaitInput,
 } from "./slack.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -399,6 +400,7 @@ export const WS_METHODS = {
   slackSetChannelExcluded: "slack.setChannelExcluded",
   slackListMembers: "slack.listMembers",
   slackSetConversationOwner: "slack.setConversationOwner",
+  slackSetConversationWait: "slack.setConversationWait",
   devinConnect: "devin.connect",
   devinDisconnect: "devin.disconnect",
 
@@ -1414,6 +1416,11 @@ const WsSlackSetConversationOwnerRpc = Rpc.make(WS_METHODS.slackSetConversationO
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+const WsSlackSetConversationWaitRpc = Rpc.make(WS_METHODS.slackSetConversationWait, {
+  payload: SlackSetConversationWaitInput,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 /** Saves a Devin API key after checking it with Devin. */
 const WsDevinConnectRpc = Rpc.make(WS_METHODS.devinConnect, {
   payload: DevinConnectInput,
@@ -1701,6 +1708,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackSetChannelExcludedRpc,
   WsSlackListMembersRpc,
   WsSlackSetConversationOwnerRpc,
+  WsSlackSetConversationWaitRpc,
   WsDevinConnectRpc,
   WsDevinDisconnectRpc,
   WsSubscribeSlackStateRpc,

@@ -1089,6 +1089,12 @@ export const ServerSettings = Schema.Struct({
   workProjectRootIds: Schema.optionalKey(Schema.Array(ProjectId)),
   /** Keep adding new Codex and Claude app sessions as threads; absent means on. */
   agentSessionAutoImport: Schema.optionalKey(Schema.Boolean),
+  /** Projects whose threads get the Work tools: Slack, Devin, and every T3 thread here. */
+  workAgentProjectIds: Schema.optionalKey(Schema.Array(ProjectId)),
+  /** The thread the Work button opens: the user's standing Work agent. */
+  workAgentThreadId: Schema.optionalKey(TrimmedNonEmptyString),
+  /** Send the Work agent new Needs me items as they arrive; absent means off. */
+  workAgentAutoTriage: Schema.optionalKey(Schema.Boolean),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
@@ -1451,6 +1457,9 @@ const OpenCodeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   workProjectRootIds: Schema.optionalKey(Schema.Array(ProjectId)),
   agentSessionAutoImport: Schema.optionalKey(Schema.Boolean),
+  workAgentProjectIds: Schema.optionalKey(Schema.Array(ProjectId)),
+  workAgentThreadId: Schema.optionalKey(TrimmedNonEmptyString),
+  workAgentAutoTriage: Schema.optionalKey(Schema.Boolean),
   worktreeCleanup: Schema.optionalKey(
     Schema.NullOr(
       Schema.Union([

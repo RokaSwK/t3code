@@ -1,7 +1,7 @@
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { includedWorkProjects, workRootsForEnvironment } from "./workScope";
+import { includedWorkProjects, workRootsForEnvironment } from "./work.ts";
 
 const local = EnvironmentId.make("local");
 const remote = EnvironmentId.make("remote");

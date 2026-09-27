@@ -911,6 +911,17 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     ),
   );
 
+  /** Threads in a Work agent project see and act on the user's work; denied when unreadable. */
+  const workAgentAccess = Effect.fn("ProviderService.workAgentAccess")(
+    function* (threadId: ThreadId) {
+      const projectIds = (yield* serverSettings.getSettings).workAgentProjectIds ?? [];
+      if (projectIds.length === 0 || Option.isNone(projectionQuery)) return false;
+      const thread = yield* projectionQuery.value.getThreadShellById(threadId);
+      return Option.isSome(thread) && projectIds.includes(thread.value.projectId);
+    },
+    Effect.catch(() => Effect.succeed(false)),
+  );
+
   const agentAccessCapabilities = Effect.fn("ProviderService.agentAccessCapabilities")(function* (
     threadId: ThreadId,
   ) {
@@ -918,6 +929,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     const access = yield* agentAccessSettings(threadId);
     if (access.browser) capabilities.add("preview");
     if (access.device) capabilities.add("device");
+    if (yield* workAgentAccess(threadId)) capabilities.add("work");
     return capabilities;
   });
 

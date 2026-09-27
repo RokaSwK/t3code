@@ -237,14 +237,17 @@ function useWorkList(slackState: SlackState | null) {
   const conversations = slackConnected ? slackState!.conversations : undefined;
   const dismissed = slackState?.dismissed;
   const owners = slackState?.conversationOwners;
+  const waits = slackState?.conversationWaits;
   const groups = useMemo(
     () =>
       buildWorkGroups(shells, {
         ...(conversations ? { conversations } : {}),
         ...(dismissed ? { dismissed } : {}),
         ...(owners ? { owners } : {}),
+        ...(waits ? { waits } : {}),
+        now: Date.now(),
       }),
-    [shells, conversations, dismissed, owners],
+    [shells, conversations, dismissed, owners, waits],
   );
   const includedProjects = useMemo(
     () => includedWorkProjects(projects, configs),
@@ -487,7 +490,7 @@ export function JobPage() {
                   {state.sync.error ? ` · ${state.sync.error}` : ""}
                 </span>
               ) : null}
-              <WorkAgentButton root={agentRoot} groups={list.all} projects={projects} />
+              <WorkAgentButton environmentId={environmentId} fallbackRoot={agentRoot} />
               {list.slackConnected && environmentId ? (
                 <Tooltip>
                   <TooltipTrigger

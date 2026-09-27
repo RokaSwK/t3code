@@ -5,7 +5,12 @@
  * @module WorkSettingsPanel
  */
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { DevinConnection, EnvironmentId, SlackConnection } from "@t3tools/contracts";
+import {
+  type DevinConnection,
+  type EnvironmentId,
+  ProjectId,
+  type SlackConnection,
+} from "@t3tools/contracts";
 import { useState } from "react";
 
 import { readLocalApi } from "~/localApi";
@@ -15,7 +20,7 @@ import {
   agentSessionSyncStatus,
   describeAgentSessionSync,
 } from "~/state/agentSessionSync";
-import { useServerConfigs } from "~/state/entities";
+import { useProjects, useServerConfigs } from "~/state/entities";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -26,7 +31,10 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Skeleton } from "../ui/skeleton";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { WorkAgentButton } from "./WorkAgentButton";
+import { workRootsForEnvironment } from "./workScope";
 import { toastManager } from "../ui/toast";
 import { SlackConnectPanel } from "./SlackConnectPanel";
 
@@ -231,6 +239,75 @@ function AgentSessionImportSettings({ environmentId }: { readonly environmentId:
   );
 }
 
+const NO_FOLDER = "none";
+
+/** Where the Work agent lives, whether it looks at new items itself, and a way to open it. */
+function WorkAgentSettings({ environmentId }: { readonly environmentId: EnvironmentId }) {
+  const configs = useServerConfigs();
+  const projects = useProjects();
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const config = configs.get(environmentId);
+  const settings = config?.settings;
+  const local = projects
+    .filter((project) => project.environmentId === environmentId)
+    .toSorted((left, right) => left.title.localeCompare(right.title));
+  const folderId = settings?.workAgentProjectIds?.[0] ?? NO_FOLDER;
+  const folder = local.find((project) => project.id === folderId);
+  const fallbackRoot = workRootsForEnvironment(projects, environmentId, config)[0] ?? null;
+  return (
+    <>
+      <SettingsRow
+        id="work-agent-folder"
+        title="Work agent folder"
+        description="Its threads can see and act on your work: Slack, Devin, and other T3 threads. Threads it starts elsewhere cannot."
+        control={
+          <Select
+            value={folderId}
+            onValueChange={(value) =>
+              updateSettings({
+                workAgentProjectIds:
+                  value === NO_FOLDER || value === null ? [] : [ProjectId.make(value)],
+              })
+            }
+          >
+            <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Work agent folder">
+              <SelectValue>{folder?.title ?? "None"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value={NO_FOLDER}>
+                None
+              </SelectItem>
+              {local.map((project) => (
+                <SelectItem key={project.id} hideIndicator value={project.id}>
+                  {project.title}
+                </SelectItem>
+              ))}
+            </SelectPopup>
+          </Select>
+        }
+      />
+      <SettingsRow
+        id="work-agent-auto-triage"
+        title="Tell the Work agent about new items"
+        description="When something new needs you, the Work agent gets a message and looks into it, at most every 15 minutes."
+        control={
+          <Switch
+            aria-label="Tell the Work agent about new items"
+            checked={settings?.workAgentAutoTriage === true}
+            onCheckedChange={(checked) => updateSettings({ workAgentAutoTriage: checked })}
+          />
+        }
+      />
+      <SettingsRow
+        id="work-agent-open"
+        title="Work agent"
+        description="Your standing thread for triage. Opens with a prompt ready to send."
+        control={<WorkAgentButton environmentId={environmentId} fallbackRoot={fallbackRoot} />}
+      />
+    </>
+  );
+}
+
 export function WorkSettingsPanel() {
   const environmentId = usePrimaryEnvironmentId();
   const state = useSlackState(environmentId);
@@ -245,6 +322,13 @@ export function WorkSettingsPanel() {
           <Skeleton className="m-4 h-16" />
         ) : (
           <SlackSettings environmentId={environmentId} connection={state.connection} />
+        )}
+      </SettingsSection>
+      <SettingsSection id="work-agent" title="Work agent">
+        {environmentId === null ? (
+          <Skeleton className="m-4 h-16" />
+        ) : (
+          <WorkAgentSettings environmentId={environmentId} />
         )}
       </SettingsSection>
       <SettingsSection id="agent-sessions" title="Codex and Claude apps">

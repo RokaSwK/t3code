@@ -23,7 +23,7 @@ import { toastManager } from "./ui/toast";
 type OwnerTarget =
   | { readonly kind: "thread"; readonly threadRef: ScopedThreadRef }
   | {
-      readonly kind: "conversation";
+      readonly kind: "conversation" | "wait";
       readonly environmentId: EnvironmentId;
       readonly conversation: SlackThreadRef;
     };
@@ -48,10 +48,18 @@ export function requestConversationOwner(
   return requestOwner({ kind: "conversation", environmentId, conversation });
 }
 
+/** Opens the picker for who a conversation of yours is waiting on, such as a reviewer. */
+export function requestConversationWait(
+  environmentId: EnvironmentId,
+  conversation: SlackThreadRef,
+): Promise<void> {
+  return requestOwner({ kind: "wait", environmentId, conversation });
+}
+
 function targetKey(target: OwnerTarget): string {
   return target.kind === "thread"
     ? `thread:${target.threadRef.environmentId}:${target.threadRef.threadId}`
-    : `conversation:${target.environmentId}:${target.conversation.channelId}:${target.conversation.ts}`;
+    : `${target.kind}:${target.environmentId}:${target.conversation.channelId}:${target.conversation.ts}`;
 }
 
 function finish() {
@@ -101,6 +109,14 @@ type MembersState =
   | { readonly status: "ready"; readonly members: ReadonlyArray<SlackMember> }
   | { readonly status: "error"; readonly message: string };
 
+function memberOf(owner: ThreadOwner) {
+  return {
+    userId: owner.userId,
+    name: owner.name,
+    ...(owner.avatarUrl ? { avatarUrl: owner.avatarUrl } : {}),
+  };
+}
+
 function toOwner(member: SlackMember): ThreadOwner {
   return {
     kind: "slack",
@@ -120,6 +136,9 @@ function ThreadOwnerDialog({ target }: { readonly target: OwnerTarget }) {
   const listMembers = useAtomCommand(slackEnvironment.listMembers, { reportFailure: false });
   const update = useAtomCommand(threadEnvironment.updateMetadata, { reportFailure: false });
   const setConversationOwner = useAtomCommand(slackEnvironment.setConversationOwner, {
+    reportFailure: false,
+  });
+  const setConversationWait = useAtomCommand(slackEnvironment.setConversationWait, {
     reportFailure: false,
   });
   const [members, setMembers] = useState<MembersState>({ status: "loading" });
@@ -146,15 +165,16 @@ function ThreadOwnerDialog({ target }: { readonly target: OwnerTarget }) {
     };
   }, [connected, listMembers, environmentId]);
 
-  const conversationOwner =
-    target.kind === "conversation"
-      ? (slack?.conversationOwners.find(
-          (entry) =>
-            entry.channelId === target.conversation.channelId &&
-            entry.ts === target.conversation.ts,
-        ) ?? null)
-      : null;
-  const currentOwner = target.kind === "thread" ? (thread?.owner ?? null) : conversationOwner;
+  const sameConversation = (entry: { readonly channelId: string; readonly ts: string }) =>
+    target.kind !== "thread" &&
+    entry.channelId === target.conversation.channelId &&
+    entry.ts === target.conversation.ts;
+  const currentOwner =
+    target.kind === "thread"
+      ? (thread?.owner ?? null)
+      : target.kind === "conversation"
+        ? (slack?.conversationOwners.find(sameConversation) ?? null)
+        : (slack?.conversationWaits.find(sameConversation) ?? null);
   const search = query.trim().toLocaleLowerCase();
   const showYou = search.length === 0 || "you".includes(search) || "me".includes(search);
   const candidates =
@@ -175,19 +195,15 @@ function ThreadOwnerDialog({ target }: { readonly target: OwnerTarget }) {
             environmentId,
             input: { threadId: target.threadRef.threadId, owner },
           })
-        : await setConversationOwner({
-            environmentId,
-            input: {
-              ...target.conversation,
-              owner: owner
-                ? {
-                    userId: owner.userId,
-                    name: owner.name,
-                    ...(owner.avatarUrl ? { avatarUrl: owner.avatarUrl } : {}),
-                  }
-                : null,
-            },
-          });
+        : await (target.kind === "conversation"
+            ? setConversationOwner({
+                environmentId,
+                input: { ...target.conversation, owner: owner ? memberOf(owner) : null },
+              })
+            : setConversationWait({
+                environmentId,
+                input: { ...target.conversation, member: owner ? memberOf(owner) : null },
+              }));
     setSaving(false);
     if (result._tag === "Failure") {
       const cause = squashAtomCommandFailure(result);
@@ -211,12 +227,18 @@ function ThreadOwnerDialog({ target }: { readonly target: OwnerTarget }) {
       <DialogPopup className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>
-            {target.kind === "thread" ? "Thread owner" : "Conversation owner"}
+            {target.kind === "thread"
+              ? "Thread owner"
+              : target.kind === "conversation"
+                ? "Conversation owner"
+                : "Waiting on"}
           </DialogTitle>
           <DialogDescription>
             {target.kind === "thread"
               ? "Who this thread is for. You own the threads you create unless you hand one over."
-              : "Hand this conversation to someone. It moves to Watching on the Work page, where you still see its updates."}
+              : target.kind === "conversation"
+                ? "Hand this conversation to someone. It moves to Watching on the Work page, where you still see its updates."
+                : "Who you are waiting on, such as a reviewer. It shows as Waiting until someone else replies."}
           </DialogDescription>
         </DialogHeader>
         <Command mode="none" value={query} onValueChange={setQuery} aria-label="Choose an owner">
@@ -225,7 +247,7 @@ function ThreadOwnerDialog({ target }: { readonly target: OwnerTarget }) {
             {showYou ? (
               <CommandItem value="you" disabled={saving} onClick={() => void assign(null)}>
                 <UserIcon aria-hidden className="size-4 shrink-0" />
-                <span className="flex-1 truncate">You</span>
+                <span className="flex-1 truncate">{target.kind === "wait" ? "No one" : "You"}</span>
                 {currentOwner === null ? (
                   <CheckIcon aria-label="Current owner" className="size-3.5" />
                 ) : null}

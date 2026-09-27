@@ -1,7 +1,7 @@
 import type { SlackThread } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { slackThreadDoneReason } from "./slackInbox";
+import { slackThreadDoneReason } from "./work.ts";
 
 const thread = (overrides: Partial<SlackThread>): SlackThread => ({
   channelId: "C1",

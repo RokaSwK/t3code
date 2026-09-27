@@ -29,7 +29,11 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { requestConversationOwner, ThreadOwnerAvatar } from "../ThreadOwnerDialog";
+import {
+  requestConversationOwner,
+  requestConversationWait,
+  ThreadOwnerAvatar,
+} from "../ThreadOwnerDialog";
 import { SlackConversationView } from "./SlackConversationView";
 import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 import type { WorkGroup, WorkPullRequest, WorkThread } from "./workGroups";
@@ -241,6 +245,7 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
   const setOwner = useAtomCommand(slackEnvironment.setConversationOwner, {
     reportFailure: false,
   });
+  const setWait = useAtomCommand(slackEnvironment.setConversationWait, { reportFailure: false });
   const [busy, setBusy] = useState(false);
   const ref = { channelId: thread.channelId, ts: thread.ts };
   const run = (action: () => Promise<{ readonly _tag: string }>, failure: string) => {
@@ -267,6 +272,11 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
         "Could not follow the thread",
       ),
     unfollow: () => run(() => unfollow({ environmentId, input: ref }), "Could not unfollow"),
+    stopWaiting: () =>
+      run(
+        () => setWait({ environmentId, input: { ...ref, member: null } }),
+        "Could not stop waiting",
+      ),
     takeBack: () =>
       run(
         () => setOwner({ environmentId, input: { ...ref, owner: null } }),
@@ -331,6 +341,18 @@ function SlackDetail({
             >
               Assign owner…
             </MenuItem>
+            <MenuItem
+              disabled={actions.busy}
+              onClick={() => {
+                if (!mine) actions.follow();
+                void requestConversationWait(environmentId, {
+                  channelId: thread.channelId,
+                  ts: thread.ts,
+                });
+              }}
+            >
+              Waiting on…
+            </MenuItem>
             {thread.followed ? (
               <MenuItem disabled={actions.busy} onClick={actions.unfollow}>
                 Unfollow
@@ -343,6 +365,23 @@ function SlackDetail({
         <div className="flex flex-col gap-5 p-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs">{status}</div>
+            {group?.waitingOn && !group.owner ? (
+              <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <ThreadOwnerAvatar
+                  owner={{ kind: "slack", ...group.waitingOn }}
+                  className="size-4"
+                />
+                <span className="truncate">Waiting on {group.waitingOn.name}</span>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={actions.busy}
+                  onClick={actions.stopWaiting}
+                >
+                  Stop waiting
+                </Button>
+              </span>
+            ) : null}
             {group?.owner ? (
               <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                 <ThreadOwnerAvatar owner={{ kind: "slack", ...group.owner }} className="size-4" />

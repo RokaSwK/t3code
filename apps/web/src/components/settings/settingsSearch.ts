@@ -585,6 +585,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["connect sign in disconnect workspace inbox follow threads"],
   },
   {
+    id: "work-agent-folder",
+    title: "Work agent",
+    to: "/settings/work",
+    searchTerms: ["triage agent work tools mcp folder slack devin auto"],
+  },
+  {
     id: "agent-session-auto-import",
     title: "Import Codex and Claude sessions",
     to: "/settings/work",

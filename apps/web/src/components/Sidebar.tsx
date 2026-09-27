@@ -220,6 +220,7 @@ import { makeWorkspaceFileDropHandlers } from "./chat/workspaceFileDrop";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import { ImportedThreadBadge, importedThreadInstanceId } from "./ImportedThreadBadge";
+import { useSettleSlackLinks } from "./job/useSettleSlackLinks";
 import {
   deriveProviderEntriesByEnvironment,
   shouldShowInstanceBadge,
@@ -1311,13 +1312,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       onCommitRename(threadRef, renamingTitle, thread.title);
     }
   }, [onCommitRename, renamingTitle, thread.title, threadRef]);
+  const settleSlackLinks = useSettleSlackLinks();
   const handleSettleClick = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
       onSettle(threadRef);
+      // Cmd-click also closes out the Slack conversations the thread came from.
+      if ((event.metaKey || event.ctrlKey) && thread.linkedSlackThreads?.length) {
+        settleSlackLinks(threadRef.environmentId, thread.linkedSlackThreads);
+      }
     },
-    [onSettle, threadRef],
+    [onSettle, settleSlackLinks, thread.linkedSlackThreads, threadRef],
   );
   const handleUnsettleClick = useCallback(
     (event: ReactMouseEvent) => {
@@ -1945,7 +1951,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                             <CheckIcon className="size-3.5" />
                             Settle
                           </TooltipTrigger>
-                          <TooltipPopup>Settle thread</TooltipPopup>
+                          <TooltipPopup>
+                            {thread.linkedSlackThreads?.length
+                              ? "Settle thread · ⌘-click also marks Slack done ✅"
+                              : "Settle thread"}
+                          </TooltipPopup>
                         </Tooltip>
                       ) : null}
                     </span>

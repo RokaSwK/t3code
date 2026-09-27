@@ -73,6 +73,10 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:set-conversation-owner",
       tag: WS_METHODS.slackSetConversationOwner,
     }),
+    setConversationWait: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-conversation-wait",
+      tag: WS_METHODS.slackSetConversationWait,
+    }),
     devinConnect: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:devin-connect",
       tag: WS_METHODS.devinConnect,
