@@ -277,6 +277,14 @@ import {
   SlackSetReplyDraftInput,
   SlackSendReplyInput,
 } from "./slack.ts";
+import {
+  RevylError,
+  RevylInputRequest,
+  RevylSession,
+  RevylStartInput,
+  RevylState,
+  RevylStopInput,
+} from "./revyl.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   ProjectCloneActionInput,
@@ -407,6 +415,10 @@ export const WS_METHODS = {
   slackSendReply: "slack.sendReply",
   devinConnect: "devin.connect",
   devinDisconnect: "devin.disconnect",
+  revylState: "revyl.state",
+  revylStart: "revyl.start",
+  revylStop: "revyl.stop",
+  revylInput: "revyl.input",
 
   // Server meta
   serverProbe: "server.probe",
@@ -1447,6 +1459,30 @@ const WsDevinDisconnectRpc = Rpc.make(WS_METHODS.devinDisconnect, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+/** Whether the `revyl` CLI is here and signed in, and its active cloud device sessions. */
+const WsRevylStateRpc = Rpc.make(WS_METHODS.revylState, {
+  payload: Schema.Struct({}),
+  success: RevylState,
+  error: Schema.Union([RevylError, EnvironmentAuthorizationError]),
+});
+
+const WsRevylStartRpc = Rpc.make(WS_METHODS.revylStart, {
+  payload: RevylStartInput,
+  success: RevylSession,
+  error: Schema.Union([RevylError, EnvironmentAuthorizationError]),
+});
+
+const WsRevylStopRpc = Rpc.make(WS_METHODS.revylStop, {
+  payload: RevylStopInput,
+  error: Schema.Union([RevylError, EnvironmentAuthorizationError]),
+});
+
+/** One tap, swipe, key, or text entry on a session's device. */
+const WsRevylInputRpc = Rpc.make(WS_METHODS.revylInput, {
+  payload: RevylInputRequest,
+  error: Schema.Union([RevylError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeSlackStateRpc = Rpc.make(WS_METHODS.subscribeSlackState, {
   payload: Schema.Struct({}),
   success: SlackState,
@@ -1727,6 +1763,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackSendReplyRpc,
   WsDevinConnectRpc,
   WsDevinDisconnectRpc,
+  WsRevylStateRpc,
+  WsRevylStartRpc,
+  WsRevylStopRpc,
+  WsRevylInputRpc,
   WsSubscribeSlackStateRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,

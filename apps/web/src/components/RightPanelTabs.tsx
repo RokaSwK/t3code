@@ -27,6 +27,7 @@ import {
   TerminalSquare,
   Volume2,
   VolumeOff,
+  Cloud,
 } from "lucide-react";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
@@ -123,6 +124,8 @@ interface RightPanelTabsProps {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddSlack?: (() => void) | undefined;
+  /** Absent where Revyl cloud devices are not offered. */
+  onAddRevyl?: (() => void) | undefined;
   slackAvailable?: boolean | undefined;
   onAddAgents: () => void;
   onAddDevice: () => void;
@@ -328,6 +331,8 @@ function RightPanelEmptyState(props: {
   onAddPullRequest: () => void;
   onAddPullRequests: () => void;
   onAddSlack?: (() => void) | undefined;
+  /** Absent where Revyl cloud devices are not offered. */
+  onAddRevyl?: (() => void) | undefined;
   slackAvailable?: boolean | undefined;
   onAddAgents: () => void;
   onAddDevice: () => void;
@@ -425,6 +430,16 @@ function RightPanelEmptyState(props: {
       available: props.deviceAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.device,
       onClick: props.onAddDevice,
+      badgeCount: 0,
+    },
+    {
+      label: "Revyl",
+      description: "Use a Revyl cloud iPhone or Android device.",
+      icon: Cloud,
+      shortcut: "R",
+      available: props.onAddRevyl !== undefined,
+      disabledReason: "Revyl devices are available in server threads.",
+      onClick: () => props.onAddRevyl?.(),
       badgeCount: 0,
     },
   ] as const;
@@ -646,6 +661,8 @@ function surfaceTitle(
       return "Pull requests";
     case "agents":
       return "Agents";
+    case "revyl":
+      return "Revyl";
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -733,6 +750,8 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "agents":
       return <Bot className="size-3 shrink-0" />;
+    case "revyl":
+      return <Cloud className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -959,6 +978,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       available: props.deviceAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
+    },
+    {
+      label: "Revyl",
+      icon: Cloud,
+      shortcut: "R",
+      available: props.onAddRevyl !== undefined,
+      disabledReason: "Revyl devices are available in server threads.",
+      onClick: () => props.onAddRevyl?.(),
     },
   ] as const;
 
@@ -1442,6 +1469,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequest={props.onAddPullRequest}
             onAddPullRequests={props.onAddPullRequests}
             onAddSlack={props.onAddSlack}
+            onAddRevyl={props.onAddRevyl}
             slackAvailable={props.slackAvailable}
             onAddAgents={props.onAddAgents}
             onAddDevice={props.onAddDevice}

@@ -78,6 +78,7 @@ import * as DeviceService from "./device/DeviceService.ts";
 import * as SlackService from "./slack/SlackService.ts";
 import * as AgentSessionScannerModule from "./project/AgentSessionScanner.ts";
 import * as AgentSessionSync from "./project/AgentSessionSync.ts";
+import * as RevylService from "./revyl/RevylService.ts";
 import * as WorkAgentNudger from "./work/WorkAgentNudger.ts";
 import { deviceHubProxyRouteLayer } from "./device/DeviceHubProxy.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -517,6 +518,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ReplayMarkers.layer),
   Layer.provideMerge(ProviderAuthServiceLive),
   Layer.provideMerge(AgentSessionSyncLive),
+  Layer.provideMerge(RevylService.layer.pipe(Layer.provide(ProcessRunner.layer))),
   Layer.provideMerge(WorkAgentNudger.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   // Core Services
   Layer.provideMerge(ServerSettingsLayerLive),

@@ -116,3 +116,15 @@ localhost without forwarding or another reachable address.
 The connected T3 server manages the device hub and agent tools on its own machine and configured SSH hosts. Required versions install automatically the next time those tools are used. Settings → Integrations → Check device tool versions reads installed versions without installing tools or starting devices.
 
 To receive newer tool versions on a remote environment, update that environment's T3 server. Updating only the browser or mobile app does not update the remote server. An offline host keeps its installed files, but an update needs network access before device support can start; T3 does not fall back to an older version. Reconnect the host and use Retry if installation fails. Existing device and agent-access settings are preserved.
+
+## Revyl cloud devices
+
+To use a Revyl cloud iPhone or Android device, choose **Revyl** from the right panel's **+**
+menu. It uses the Revyl CLI on the machine running T3 Code, so install it and run
+`revyl auth login` there first. Start a device from the panel, or open one an agent started
+with `revyl device start`; every active session on your Revyl account shows up.
+
+The screen plays live. Click to tap, hold to long-press, drag to swipe, and type while the
+screen is focused. **Home**, and **Back** on Android, are below the screen. Each action takes
+about a second to reach the device. The stop button releases the device, which ends its
+billing; Revyl also stops an idle device on its own.
