@@ -32,6 +32,7 @@ import {
   readEnvironmentSupportsActiveReorder,
   readEnvironmentSupportsSettlement,
   readEnvironmentSupportsSnooze,
+  readEnvironmentSupportsMergeWait,
   readEnvironmentThreadRefs,
   readProject,
   readThreadShell,
@@ -716,7 +717,7 @@ export function useThreadActions() {
           if (snoozedUntil !== null) {
             return snoozeThreadMutation({
               environmentId: target.environmentId,
-              input: { threadId: target.threadId, snoozedUntil },
+              input: { threadId: target.threadId, snoozedUntil, untilMerge: snoozedUntil === null },
             });
           }
           return unsettled;
@@ -821,9 +822,19 @@ export function useThreadActions() {
   );
 
   const snoozeThread = useCallback(
-    async (target: ScopedThreadRef, snoozedUntil: string) => {
+    async (target: ScopedThreadRef, snoozedUntil: string | null) => {
       // Version skew: never send the command to a server that predates it.
       if (!readEnvironmentSupportsSnooze(target.environmentId)) {
+        return AsyncResult.failure(
+          Cause.fail(
+            new ThreadSnoozeUnsupportedError({
+              environmentId: target.environmentId,
+              threadId: target.threadId,
+            }),
+          ),
+        );
+      }
+      if (snoozedUntil === null && !readEnvironmentSupportsMergeWait(target.environmentId)) {
         return AsyncResult.failure(
           Cause.fail(
             new ThreadSnoozeUnsupportedError({
@@ -850,7 +861,7 @@ export function useThreadActions() {
       const action = ThreadUndo.begin("snooze", scopedThreadKey(target));
       const result = await snoozeThreadMutation({
         environmentId: target.environmentId,
-        input: { threadId: target.threadId, snoozedUntil },
+        input: { threadId: target.threadId, snoozedUntil, untilMerge: snoozedUntil === null },
       });
       if (result._tag !== "Success") {
         action.finish();

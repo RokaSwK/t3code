@@ -264,8 +264,8 @@ export const SlackState = Schema.Struct({
   dismissed: Schema.Array(SlackDismissedThread).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
-  /** Exclusions apply to the new-thread feed, while followed threads remain available. */
-  excludedChannelIds: Schema.Array(Schema.String).pipe(
+  /** Channels the new-thread feed reads; none until the user chooses. Followed threads are unaffected. */
+  includedChannelIds: Schema.Array(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   /**
@@ -426,11 +426,11 @@ export const SlackSendReplyInput = Schema.Struct({
 });
 export type SlackSendReplyInput = typeof SlackSendReplyInput.Type;
 
-export const SlackSetChannelExcludedInput = Schema.Struct({
+export const SlackSetChannelIncludedInput = Schema.Struct({
   channelId: Schema.String,
-  excluded: Schema.Boolean,
+  included: Schema.Boolean,
 });
-export type SlackSetChannelExcludedInput = typeof SlackSetChannelExcludedInput.Type;
+export type SlackSetChannelIncludedInput = typeof SlackSetChannelIncludedInput.Type;
 
 export class SlackError extends Schema.TaggedError<SlackError>()("SlackError", {
   operation: Schema.String,

@@ -1095,6 +1095,8 @@ export const ServerSettings = Schema.Struct({
   workAgentThreadId: Schema.optionalKey(TrimmedNonEmptyString),
   /** Send the Work agent new Needs me items as they arrive; absent means off. */
   workAgentAutoTriage: Schema.optionalKey(Schema.Boolean),
+  /** GitHub owners (users or organizations) whose pull requests join Work; absent means all. */
+  workGitHubOwners: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
@@ -1460,6 +1462,7 @@ export const ServerSettingsPatch = Schema.Struct({
   workAgentProjectIds: Schema.optionalKey(Schema.Array(ProjectId)),
   workAgentThreadId: Schema.optionalKey(TrimmedNonEmptyString),
   workAgentAutoTriage: Schema.optionalKey(Schema.Boolean),
+  workGitHubOwners: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   worktreeCleanup: Schema.optionalKey(
     Schema.NullOr(
       Schema.Union([

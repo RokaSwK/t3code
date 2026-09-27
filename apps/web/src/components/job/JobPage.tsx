@@ -36,7 +36,7 @@ import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadc
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { ThreadOwnerAvatar } from "../ThreadOwnerDialog";
-import { ChannelExclusionsDialog } from "./ChannelExclusionsDialog";
+import { ChannelPickerDialog } from "./ChannelPickerDialog";
 import { slackThreadDoneReason } from "./slackInbox";
 import { WorkAgentButton } from "./WorkAgentButton";
 import { WorkDetail, type WorkSelection } from "./WorkDetail";
@@ -66,7 +66,7 @@ function syncLabel(sync: SlackState["sync"]): string {
     return `Slack asked us to slow down until ${new Date(sync.rateLimitedUntil).toLocaleTimeString()}`;
   }
   if (sync.channelCount === 0) {
-    return sync.availableChannelCount > 0 ? "All channels excluded" : "Finding your channels…";
+    return sync.availableChannelCount > 0 ? "No channels chosen" : "Finding your channels…";
   }
   if (sync.syncedChannelCount < sync.channelCount) {
     return `Reading channels ${sync.syncedChannelCount} of ${sync.channelCount}…`;
@@ -196,9 +196,8 @@ function JobHeaderMenu({
           <AlertDialogHeader>
             <AlertDialogTitle>Reset Slack inbox?</AlertDialogTitle>
             <AlertDialogDescription>
-              Clear threads marked done and channel exclusions. Only conversations started after
-              this reset will appear on this page. T3 threads, Slack links, and your 👀 reactions in
-              Slack stay in place.
+              Clear threads marked done. Only conversations started after this reset will appear on
+              this page. T3 threads, Slack links, and your 👀 reactions in Slack stay in place.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -243,6 +242,11 @@ function useWorkList(slackState: SlackState | null) {
   const waits = slackState?.conversationWaits;
   const reviewRequests = slackConnected ? slackState!.reviewRequests : undefined;
   const authored = slackConnected ? slackState!.authoredPullRequests : undefined;
+  // The GitHub queue is read by the primary environment, which also holds this choice.
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const gitHubOwners = primaryEnvironmentId
+    ? configs.get(primaryEnvironmentId)?.settings.workGitHubOwners
+    : undefined;
   const groups = useMemo(
     () =>
       buildWorkGroups(shells, {
@@ -250,10 +254,18 @@ function useWorkList(slackState: SlackState | null) {
         ...(dismissed ? { dismissed } : {}),
         ...(owners ? { owners } : {}),
         ...(waits ? { waits } : {}),
-        ...(reviewRequests && authored ? { github: { reviewRequests, authored } } : {}),
+        ...(reviewRequests && authored
+          ? {
+              github: {
+                reviewRequests,
+                authored,
+                ...(gitHubOwners ? { owners: gitHubOwners } : {}),
+              },
+            }
+          : {}),
         now: Date.now(),
       }),
-    [shells, conversations, dismissed, owners, waits, reviewRequests, authored],
+    [shells, conversations, dismissed, owners, waits, reviewRequests, authored, gitHubOwners],
   );
   const includedProjects = useMemo(
     () => includedWorkProjects(projects, configs),
@@ -638,7 +650,14 @@ export function JobPage() {
                       ) : undefined
                     }
                   />
-                  {list.fresh.length === 0 ? (
+                  {state?.includedChannelIds.length === 0 ? (
+                    <div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
+                      Pick the channels to watch for new threads.
+                      <Button size="xs" variant="outline" onClick={() => setManagingChannels(true)}>
+                        Choose channels…
+                      </Button>
+                    </div>
+                  ) : list.fresh.length === 0 ? (
                     <p className="px-3 py-1 text-xs text-muted-foreground">
                       No new threads in your channels in the last day.
                     </p>
@@ -765,7 +784,7 @@ export function JobPage() {
         ) : null}
       </div>
       {list.slackConnected && environmentId && state ? (
-        <ChannelExclusionsDialog
+        <ChannelPickerDialog
           environmentId={environmentId}
           state={state}
           open={managingChannels}

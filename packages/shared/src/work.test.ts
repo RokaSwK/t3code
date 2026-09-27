@@ -373,4 +373,19 @@ describe("buildWorkGroups with the GitHub queue", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({ status: "needs", reason: "PR checks failing" });
   });
+
+  it("keeps only the chosen GitHub owners' pull requests in the queue", () => {
+    const groups = buildWorkGroups([], {
+      github: {
+        reviewRequests: [],
+        authored: [
+          pr(1),
+          { ...pr(2), url: "https://github.com/Side/app/pull/2", repository: "Side/app" },
+        ],
+        owners: ["OWNER"],
+      },
+      now: nowMs,
+    });
+    expect(groups.map((group) => group.pullRequest?.number)).toEqual([1]);
+  });
 });

@@ -124,6 +124,7 @@ export function buildWorkOverview(input: {
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly slack: SlackState;
   readonly workProjectRootIds: ReadonlyArray<ProjectId> | undefined;
+  readonly workGitHubOwners?: ReadonlyArray<string> | undefined;
   readonly statuses: ReadonlyArray<WorkStatusName>;
   readonly includeNewThreads: boolean;
   readonly limit: number;
@@ -142,6 +143,7 @@ export function buildWorkOverview(input: {
     github: {
       reviewRequests: input.slack.reviewRequests,
       authored: input.slack.authoredPullRequests,
+      ...(input.workGitHubOwners ? { owners: input.workGitHubOwners } : {}),
     },
     now: input.now,
   });
@@ -295,6 +297,7 @@ const make = Effect.gen(function* () {
           projects: shell.projects,
           slack: yield* slack.current,
           workProjectRootIds: current.workProjectRootIds,
+          workGitHubOwners: current.workGitHubOwners,
           statuses: input.statuses ?? ["needs", "working", "waiting", "watching"],
           includeNewThreads: input.includeNewThreads === true,
           limit: input.limit ?? WORK_OVERVIEW_LIMIT,

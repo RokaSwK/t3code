@@ -285,6 +285,7 @@ export function createThreadEnvironmentAtoms<R, E>(
             pinnedAt: null,
             pinOrderKey: null,
             snoozedAt: null,
+            waitingForMergeAt: null,
             snoozedUntil: null,
           },
     ),
@@ -296,13 +297,15 @@ export function createThreadEnvironmentAtoms<R, E>(
     })),
     snooze: optimistic.wrap(commands.snooze, (thread, input, now, accepted) =>
       (!accepted && !canSnooze(thread, { now })) ||
-      !(Date.parse(input.snoozedUntil) > Date.parse(now))
+      (!input.untilMerge &&
+        (input.snoozedUntil === null || !(Date.parse(input.snoozedUntil) > Date.parse(now))))
         ? thread
         : {
             ...thread,
             hasPendingApprovals: false,
             hasPendingUserInput: false,
             snoozedUntil: input.snoozedUntil,
+            waitingForMergeAt: input.untilMerge ? (thread.waitingForMergeAt ?? now) : null,
             snoozedAt: thread.snoozedUntil === input.snoozedUntil ? (thread.snoozedAt ?? now) : now,
           },
     ),
@@ -310,6 +313,7 @@ export function createThreadEnvironmentAtoms<R, E>(
       ...thread,
       snoozedUntil: null,
       snoozedAt: null,
+      waitingForMergeAt: null,
     })),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,
@@ -324,6 +328,7 @@ export function createThreadEnvironmentAtoms<R, E>(
         : {}),
       snoozedUntil: null,
       snoozedAt: null,
+      waitingForMergeAt: null,
     })),
     unpin: optimistic.wrap(commands.unpin, (thread) => ({
       ...thread,

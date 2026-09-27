@@ -15,7 +15,8 @@ import {
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 
-export function ChannelExclusionsDialog({
+/** Picks the channels whose new threads show on the Work page; none are read until chosen. */
+export function ChannelPickerDialog({
   environmentId,
   state,
   open,
@@ -27,7 +28,7 @@ export function ChannelExclusionsDialog({
   readonly onOpenChange: (open: boolean) => void;
 }) {
   const getChannels = useAtomCommand(slackEnvironment.getChannels, { reportFailure: false });
-  const setExcluded = useAtomCommand(slackEnvironment.setChannelExcluded, {
+  const setIncluded = useAtomCommand(slackEnvironment.setChannelIncluded, {
     reportFailure: false,
   });
   const [channels, setChannels] = useState<ReadonlyArray<SlackChannel> | null>(null);
@@ -52,16 +53,16 @@ export function ChannelExclusionsDialog({
     };
   }, [environmentId, getChannels, open, state.sync.availableChannelCount]);
 
-  const excluded = new Set(state.excludedChannelIds);
+  const included = new Set(state.includedChannelIds);
   const visible =
     state.sync.availableChannelCount === 0
       ? []
       : channels?.filter((channel) =>
           channel.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
         );
-  const changeExcluded = (channelId: string, nextExcluded: boolean) => {
+  const changeIncluded = (channelId: string, nextIncluded: boolean) => {
     setChanging((current) => new Set(current).add(channelId));
-    void setExcluded({ environmentId, input: { channelId, excluded: nextExcluded } }).then(
+    void setIncluded({ environmentId, input: { channelId, included: nextIncluded } }).then(
       (result) => {
         setChanging((current) => {
           const next = new Set(current);
@@ -69,7 +70,7 @@ export function ChannelExclusionsDialog({
           return next;
         });
         if (result._tag === "Failure") {
-          toastManager.add({ type: "error", title: "Could not update channel exclusion" });
+          toastManager.add({ type: "error", title: "Could not update your channels" });
         }
       },
     );
@@ -79,10 +80,10 @@ export function ChannelExclusionsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup>
         <DialogHeader>
-          <DialogTitle>Exclude channels</DialogTitle>
+          <DialogTitle>Choose channels</DialogTitle>
           <DialogDescription>
-            Checked channels are left out of New threads. Threads you follow still appear in
-            Following.
+            New threads from checked channels show under New in your channels. Conversations you
+            follow show wherever they are.
           </DialogDescription>
           <Input
             type="search"
@@ -111,13 +112,13 @@ export function ChannelExclusionsDialog({
                   className="flex min-w-0 items-center gap-3 rounded-md px-2 py-1.5"
                 >
                   <Checkbox
-                    id={`exclude-${channel.id}`}
-                    checked={excluded.has(channel.id)}
+                    id={`channel-${channel.id}`}
+                    checked={included.has(channel.id)}
                     disabled={changing.has(channel.id)}
-                    onCheckedChange={(checked) => changeExcluded(channel.id, checked === true)}
+                    onCheckedChange={(checked) => changeIncluded(channel.id, checked === true)}
                   />
                   <label
-                    htmlFor={`exclude-${channel.id}`}
+                    htmlFor={`channel-${channel.id}`}
                     className="min-w-0 flex-1 cursor-pointer truncate text-sm"
                   >
                     {channel.kind === "channel" ? "#" : ""}

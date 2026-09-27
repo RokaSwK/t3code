@@ -65,9 +65,9 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:get-channels",
       tag: WS_METHODS.slackGetChannels,
     }),
-    setChannelExcluded: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:slack:set-channel-excluded",
-      tag: WS_METHODS.slackSetChannelExcluded,
+    setChannelIncluded: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-channel-included",
+      tag: WS_METHODS.slackSetChannelIncluded,
     }),
     setConversationOwner: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:set-conversation-owner",

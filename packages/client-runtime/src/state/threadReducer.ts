@@ -136,6 +136,7 @@ export function applyThreadDetailEvent(
           autoSettleDisabledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          waitingForMergeAt: null,
           deletedAt: null,
           pullRequests: [],
           messages: [],
@@ -203,6 +204,7 @@ export function applyThreadDetailEvent(
           ...thread,
           snoozedUntil: event.payload.snoozedUntil,
           snoozedAt: event.payload.snoozedAt,
+          waitingForMergeAt: event.payload.waitingForMergeAt ?? null,
           updatedAt: event.payload.updatedAt,
         },
       };
@@ -214,6 +216,7 @@ export function applyThreadDetailEvent(
           ...thread,
           snoozedUntil: null,
           snoozedAt: null,
+          waitingForMergeAt: null,
           updatedAt: event.payload.updatedAt,
         },
       };

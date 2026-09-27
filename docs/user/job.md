@@ -44,7 +44,8 @@ Pull requests from GitHub join your work too. A pull request waiting for your re
 **Needs me**. Your own open pull requests wait for review, and need you when checks fail, changes
 are requested, there is a merge conflict, or they are approved and ready to merge. Pull requests
 linked from a conversation get the same details. They are read with the GitHub CLI, every few
-minutes.
+minutes. To leave out an organization, such as a side project, turn it off under **Settings →
+Work → GitHub**.
 
 To answer a conversation, write in **Reply** in its detail and choose **Send**; it posts in the
 Slack thread as you. What you type is kept as a draft until you send or discard it, and the Work
@@ -95,15 +96,15 @@ Slack sign-in is missing either, **Settings → Work** says so and asks you to s
 
 ## New in your channels
 
-Below your work, T3 Code lists conversations started in the last day in your public channels,
-private channels, and group messages, newest first. Select one to read it, then choose **Follow**
+Below your work, T3 Code lists conversations started in the last day in the channels you choose,
+newest first. No channels are read until you pick them: choose **Choose channels…** in the page's
+**…** menu and check the public channels, private channels, and group messages to watch. Select a conversation to read it, then choose **Follow**
 to make it yours, **Start thread** to follow it and start work, or **Done** to clear it. Cleared
 threads are one click away under **Show cleared**. Direct messages are not included.
 
 Busy channels are checked every 30 seconds and quiet ones less often, within Slack's rate limits.
-If Slack asks T3 Code to slow down, the page shows when checking resumes. Use **Choose channels…**
-in the **…** menu to exclude channels from this list; conversations you follow in them still
-appear in your work.
+If Slack asks T3 Code to slow down, the page shows when checking resumes. Conversations you follow
+appear in your work whether or not their channel is chosen.
 
 ## Connect Slack
 
@@ -123,7 +124,7 @@ app's **OAuth & Permissions** page.
 
 Disconnect in **Settings → Work**. Disconnecting also revokes the token in Slack. To start a fresh
 inbox, choose **Reset Slack inbox** from the **…** menu on the Work page. This clears threads you
-marked done and channel exclusions and shows only conversations started after the reset. Existing
+marked done and shows only conversations started after the reset. Existing
 T3 threads, PR links, and Slack reactions remain as they are.
 
 Pull request status is read with the GitHub CLI on the T3 Code server, so it needs `gh` signed in

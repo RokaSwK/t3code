@@ -10,7 +10,9 @@ import {
   type EnvironmentId,
   ProjectId,
   type SlackConnection,
+  type SlackState,
 } from "@t3tools/contracts";
+import { gitHubOwnerOf } from "@t3tools/shared/work";
 import { useState } from "react";
 
 import { readLocalApi } from "~/localApi";
@@ -243,6 +245,64 @@ function AgentSessionImportSettings({ environmentId }: { readonly environmentId:
   );
 }
 
+/** Which GitHub owners' pull requests join Work; every owner until one is turned off. */
+function GitHubOwnerSettings({
+  environmentId,
+  state,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly state: SlackState;
+}) {
+  const configs = useServerConfigs();
+  const updateSettings = useUpdateEnvironmentSettings(environmentId);
+  const chosen = configs.get(environmentId)?.settings.workGitHubOwners;
+  const seen = [
+    ...new Set([
+      ...[...state.reviewRequests, ...state.authoredPullRequests].map(gitHubOwnerOf),
+      ...(chosen ?? []).map((owner) => owner.toLowerCase()),
+    ]),
+  ]
+    .filter((owner) => owner !== "")
+    .sort();
+  const included = new Set(chosen?.map((owner) => owner.toLowerCase()) ?? seen);
+  const countOf = (owner: string) =>
+    [...state.reviewRequests, ...state.authoredPullRequests].filter(
+      (pullRequest) => gitHubOwnerOf(pullRequest) === owner,
+    ).length;
+  if (seen.length === 0) {
+    return (
+      <SettingsRow
+        title="GitHub"
+        description="Pull requests waiting for your review and your own open ones show here by organization once GitHub has been read."
+      />
+    );
+  }
+  return (
+    <>
+      {seen.map((owner) => (
+        <SettingsRow
+          key={owner}
+          title={owner}
+          description={`${countOf(owner)} open ${countOf(owner) === 1 ? "pull request" : "pull requests"} for you`}
+          control={
+            <Switch
+              aria-label={`Show pull requests from ${owner}`}
+              checked={included.has(owner)}
+              onCheckedChange={(checked) =>
+                updateSettings({
+                  workGitHubOwners: seen.filter((candidate) =>
+                    candidate === owner ? checked : included.has(candidate),
+                  ),
+                })
+              }
+            />
+          }
+        />
+      ))}
+    </>
+  );
+}
+
 const NO_FOLDER = "none";
 
 /** Where the Work agent lives, whether it looks at new items itself, and a way to open it. */
@@ -326,6 +386,13 @@ export function WorkSettingsPanel() {
           <Skeleton className="m-4 h-16" />
         ) : (
           <SlackSettings environmentId={environmentId} connection={state.connection} />
+        )}
+      </SettingsSection>
+      <SettingsSection id="github" title="GitHub">
+        {environmentId === null || state === null ? (
+          <Skeleton className="m-4 h-16" />
+        ) : (
+          <GitHubOwnerSettings environmentId={environmentId} state={state} />
         )}
       </SettingsSection>
       <SettingsSection id="work-agent" title="Work agent">

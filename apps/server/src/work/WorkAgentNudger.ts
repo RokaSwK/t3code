@@ -105,6 +105,7 @@ const make = Effect.gen(function* () {
       projects: shell.projects,
       slack: yield* slack.current,
       workProjectRootIds: current.workProjectRootIds,
+      workGitHubOwners: current.workGitHubOwners,
       statuses: ["needs"],
       includeNewThreads: false,
       limit: 100,

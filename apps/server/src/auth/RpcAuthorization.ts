@@ -180,7 +180,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.slackUnfollow]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackSetDismissed]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackGetChannels]: AuthOrchestrationReadScope,
-  [WS_METHODS.slackSetChannelExcluded]: AuthOrchestrationOperateScope,
+  [WS_METHODS.slackSetChannelIncluded]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackListMembers]: AuthOrchestrationReadScope,
   [WS_METHODS.slackSetConversationOwner]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackSetConversationWait]: AuthOrchestrationOperateScope,

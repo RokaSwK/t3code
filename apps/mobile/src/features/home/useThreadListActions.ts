@@ -241,7 +241,10 @@ export function useThreadListActions(): {
   readonly archiveThread: (thread: EnvironmentThreadShell) => void;
   readonly confirmDeleteThread: (thread: EnvironmentThreadShell) => void;
   readonly settleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
-  readonly snoozeThread: (thread: EnvironmentThreadShell, snoozedUntil: string) => Promise<boolean>;
+  readonly snoozeThread: (
+    thread: EnvironmentThreadShell,
+    snoozedUntil: string | null,
+  ) => Promise<boolean>;
   readonly unsnoozeThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly unsettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
   readonly pinThread: (thread: EnvironmentThreadShell) => Promise<boolean>;
@@ -283,14 +286,19 @@ export function useThreadListActions(): {
     [executeAction],
   );
   const snoozeThread = useCallback(
-    async (thread: EnvironmentThreadShell, snoozedUntil: string) => {
+    async (thread: EnvironmentThreadShell, snoozedUntil: string | null) => {
       const key = scopedThreadKey(thread.environmentId, thread.id);
       if (snoozeInFlightThreadKeys.current.has(key)) {
         return false;
       }
       snoozeInFlightThreadKeys.current.add(key);
       try {
-        if (!environmentSupportsSnooze(thread.environmentId)) {
+        if (
+          !environmentSupportsSnooze(thread.environmentId) ||
+          (snoozedUntil === null &&
+            appAtomRegistry.get(environmentServerConfigsAtom).get(thread.environmentId)?.environment
+              .capabilities.threadMergeWait !== true)
+        ) {
           Alert.alert(
             "Could not snooze thread",
             "This environment's server does not support snoozing yet. Update the server to use Snooze.",
@@ -316,6 +324,7 @@ export function useThreadListActions(): {
               input: {
                 threadId: thread.id,
                 snoozedUntil,
+                untilMerge: snoozedUntil === null,
               },
             }),
           (result) => result._tag === "Success",

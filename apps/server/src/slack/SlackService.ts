@@ -50,7 +50,7 @@ import {
   type SlackReaction,
   type SlackSetReactionInput,
   type SlackSetDismissedInput,
-  type SlackSetChannelExcludedInput,
+  type SlackSetChannelIncludedInput,
   type SlackSetConversationOwnerInput,
   type SlackSetConversationWaitInput,
   type SlackSetReplyDraftInput,
@@ -132,7 +132,7 @@ const DISMISSED_SECRET = "slack-dismissed-threads";
 const OWNERS_SECRET = "slack-conversation-owners";
 const WAITS_SECRET = "slack-conversation-waits";
 const DRAFTS_SECRET = "slack-reply-drafts";
-const EXCLUDED_CHANNELS_SECRET = "slack-excluded-channels";
+const INCLUDED_CHANNELS_SECRET = "slack-included-channels";
 const INBOX_START_SECRET = "slack-inbox-start";
 /** `{ apiKey, orgId, name }` for Devin's API. */
 const DEVIN_SECRET = "devin-api";
@@ -238,16 +238,16 @@ const StoredDrafts = Schema.Struct({
 const decodeStoredDrafts = Schema.decodeUnknownOption(Schema.fromJsonString(StoredDrafts));
 const encodeStoredDrafts = Schema.encodeSync(Schema.fromJsonString(StoredDrafts));
 
-const StoredExcludedChannels = Schema.Struct({
+const StoredIncludedChannels = Schema.Struct({
   teamUrl: Schema.String,
   userId: Schema.String,
   channelIds: Schema.Array(Schema.String),
 });
-const decodeStoredExcludedChannels = Schema.decodeUnknownOption(
-  Schema.fromJsonString(StoredExcludedChannels),
+const decodeStoredIncludedChannels = Schema.decodeUnknownOption(
+  Schema.fromJsonString(StoredIncludedChannels),
 );
-const encodeStoredExcludedChannels = Schema.encodeSync(
-  Schema.fromJsonString(StoredExcludedChannels),
+const encodeStoredIncludedChannels = Schema.encodeSync(
+  Schema.fromJsonString(StoredIncludedChannels),
 );
 
 const StoredDevin = Schema.Struct({
@@ -453,8 +453,8 @@ export class SlackService extends Context.Service<
     /** Posts a reply in the conversation as the user and clears its draft. */
     readonly sendReply: (input: SlackSendReplyInput) => Effect.Effect<void, SlackError>;
     readonly getChannels: Effect.Effect<ReadonlyArray<SlackChannel>, SlackError>;
-    readonly setChannelExcluded: (
-      input: SlackSetChannelExcludedInput,
+    readonly setChannelIncluded: (
+      input: SlackSetChannelIncludedInput,
     ) => Effect.Effect<void, SlackError>;
     /** Workspace members, cached; who a T3 thread can be assigned to. */
     readonly listMembers: Effect.Effect<ReadonlyArray<SlackMember>, SlackError>;
@@ -568,8 +568,8 @@ const make = Effect.gen(function* () {
   const ownerWrites = yield* Semaphore.make(1);
   let inboxStartedAtMs = 0;
   const dismissedWrites = yield* Semaphore.make(1);
-  let excludedChannelIds = new Set<string>();
-  const exclusionWrites = yield* Semaphore.make(1);
+  let includedChannelIds = new Set<string>();
+  const channelWrites = yield* Semaphore.make(1);
   let followedRefreshedAt = 0;
   /** Conversations your threads live in that are not in the polled channel set. */
   const followedChannels = new Map<
@@ -679,8 +679,8 @@ const make = Effect.gen(function* () {
             ...(lastClientId ? { clientId: lastClientId } : {}),
             ...(connectionError ? { error: connectionError } : {}),
           };
-    const channelStates = [...channels.values()].filter(
-      (channel) => !excludedChannelIds.has(channel.id),
+    const channelStates = [...channels.values()].filter((channel) =>
+      includedChannelIds.has(channel.id),
     );
     return {
       connection: connectionState,
@@ -704,7 +704,7 @@ const make = Effect.gen(function* () {
       replyDrafts: connection ? replyDrafts : [],
       reviewRequests: connection ? reviewRequests : [],
       authoredPullRequests: connection ? authoredPullRequests : [],
-      excludedChannelIds: connection ? [...excludedChannelIds] : [],
+      includedChannelIds: connection ? [...includedChannelIds] : [],
       ...(connection && devinUser?.avatarUrl ? { devinAvatarUrl: devinUser.avatarUrl } : {}),
       devin: devin
         ? {
@@ -924,14 +924,14 @@ const make = Effect.gen(function* () {
         : [];
   });
 
-  const loadExcludedChannels = Effect.gen(function* () {
-    const stored = yield* secrets.get(EXCLUDED_CHANNELS_SECRET).pipe(
+  const loadIncludedChannels = Effect.gen(function* () {
+    const stored = yield* secrets.get(INCLUDED_CHANNELS_SECRET).pipe(
       Effect.map(
-        Option.flatMap((bytes) => decodeStoredExcludedChannels(new TextDecoder().decode(bytes))),
+        Option.flatMap((bytes) => decodeStoredIncludedChannels(new TextDecoder().decode(bytes))),
       ),
-      Effect.orElseSucceed(() => Option.none<typeof StoredExcludedChannels.Type>()),
+      Effect.orElseSucceed(() => Option.none<typeof StoredIncludedChannels.Type>()),
     );
-    excludedChannelIds = new Set(
+    includedChannelIds = new Set(
       connection &&
         Option.isSome(stored) &&
         stored.value.teamUrl === connection.teamUrl &&
@@ -1583,7 +1583,7 @@ const make = Effect.gen(function* () {
     pullRequestsScannedAt = now;
     const due = new Set<string>();
     const visible = [...channels.values()]
-      .filter((channel) => !excludedChannelIds.has(channel.id))
+      .filter((channel) => includedChannelIds.has(channel.id))
       .flatMap((channel) => channel.threads);
     for (const thread of [...visible, ...visibleConversations()]) {
       for (const request of thread.pullRequests ?? []) {
@@ -1698,7 +1698,7 @@ const make = Effect.gen(function* () {
       }
       let due: ChannelState | undefined;
       for (const channel of channels.values()) {
-        if (excludedChannelIds.has(channel.id)) continue;
+        if (!includedChannelIds.has(channel.id)) continue;
         if (due === undefined || channel.nextPollAt < due.nextPollAt) due = channel;
       }
       const channelDue = due !== undefined && due.nextPollAt <= now;
@@ -1812,7 +1812,7 @@ const make = Effect.gen(function* () {
       conversationWaits = [];
       replyDrafts = [];
       grantedScopes = undefined;
-      excludedChannelIds = new Set();
+      includedChannelIds = new Set();
       members = undefined;
       yield* secrets.remove(CONNECTION_SECRET).pipe(Effect.ignore);
       yield* secrets.remove(CACHE_SECRET).pipe(Effect.ignore);
@@ -1871,7 +1871,7 @@ const make = Effect.gen(function* () {
     yield* persist(next);
     connection = next;
     yield* loadDismissed;
-    yield* loadExcludedChannels;
+    yield* loadIncludedChannels;
     yield* loadOwners;
     yield* loadWaits;
     yield* loadDrafts;
@@ -2047,14 +2047,8 @@ const make = Effect.gen(function* () {
     yield* secrets
       .remove(DISMISSED_SECRET)
       .pipe(Effect.mapError(() => slackError("reset_inbox", "Could not clear dismissed threads.")));
-    yield* secrets
-      .remove(EXCLUDED_CHANNELS_SECRET)
-      .pipe(
-        Effect.mapError(() => slackError("reset_inbox", "Could not clear channel exclusions.")),
-      );
     inboxStartedAtMs = startedAtMs;
     dismissed = [];
-    excludedChannelIds = new Set();
     yield* secrets.remove(CACHE_SECRET).pipe(Effect.ignore);
     yield* startSync(false);
     yield* publish;
@@ -2341,24 +2335,24 @@ const make = Effect.gen(function* () {
       .sort((left, right) => left.name.localeCompare(right.name));
   });
 
-  const setChannelExcluded = Effect.fn("slack.set_channel_excluded")(function* (
-    input: SlackSetChannelExcludedInput,
+  const setChannelIncluded = Effect.fn("slack.set_channel_included")(function* (
+    input: SlackSetChannelIncludedInput,
   ) {
-    yield* exclusionWrites.withPermit(
+    yield* channelWrites.withPermit(
       Effect.gen(function* () {
         const current = connection;
-        if (!current) return yield* slackError("set_channel_excluded", "Slack is not connected.");
+        if (!current) return yield* slackError("set_channel_included", "Slack is not connected.");
         const channel = channels.get(input.channelId);
-        if (!channel) return yield* slackError("set_channel_excluded", "Channel is unavailable.");
-        if (excludedChannelIds.has(input.channelId) === input.excluded) return;
-        const next = new Set(excludedChannelIds);
-        if (input.excluded) next.add(input.channelId);
+        if (!channel) return yield* slackError("set_channel_included", "Channel is unavailable.");
+        if (includedChannelIds.has(input.channelId) === input.included) return;
+        const next = new Set(includedChannelIds);
+        if (input.included) next.add(input.channelId);
         else next.delete(input.channelId);
         yield* secrets
           .set(
-            EXCLUDED_CHANNELS_SECRET,
+            INCLUDED_CHANNELS_SECRET,
             new TextEncoder().encode(
-              encodeStoredExcludedChannels({
+              encodeStoredIncludedChannels({
                 teamUrl: current.teamUrl,
                 userId: current.userId,
                 channelIds: [...next],
@@ -2367,15 +2361,15 @@ const make = Effect.gen(function* () {
           )
           .pipe(
             Effect.mapError(() =>
-              slackError("set_channel_excluded", "Could not save channel exclusions."),
+              slackError("set_channel_included", "Could not save your channels."),
             ),
           );
-        excludedChannelIds = next;
+        includedChannelIds = next;
         channel.threads = [];
         channel.synced = false;
         channel.nextPollAt = 0;
         yield* publish;
-        if (!input.excluded) yield* Deferred.succeed(wake, undefined);
+        if (input.included) yield* Deferred.succeed(wake, undefined);
       }),
     );
   });
@@ -2531,7 +2525,7 @@ const make = Effect.gen(function* () {
   if (Option.isSome(stored)) {
     connection = stored.value;
     yield* loadDismissed;
-    yield* loadExcludedChannels;
+    yield* loadIncludedChannels;
     yield* loadOwners;
     yield* loadWaits;
     yield* loadDrafts;
@@ -2560,7 +2554,7 @@ const make = Effect.gen(function* () {
     setReplyDraft,
     sendReply,
     getChannels,
-    setChannelExcluded,
+    setChannelIncluded,
     listMembers,
     devinConnect,
     devinDisconnect,

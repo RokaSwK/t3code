@@ -78,7 +78,7 @@ const slackState = (overrides: Partial<SlackState>): SlackState => ({
   threads: [],
   conversations: [],
   dismissed: [],
-  excludedChannelIds: [],
+  includedChannelIds: [],
   conversationOwners: [],
   conversationWaits: [],
   reviewRequests: [],

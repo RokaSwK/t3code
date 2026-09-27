@@ -264,7 +264,7 @@ import {
   SlackMessage,
   SlackSetReactionInput,
   SlackSetDismissedInput,
-  SlackSetChannelExcludedInput,
+  SlackSetChannelIncludedInput,
   SlackState,
   SlackThreadRef,
   SlackGetThreadInput,
@@ -399,7 +399,7 @@ export const WS_METHODS = {
   slackUnfollow: "slack.unfollow",
   slackSetDismissed: "slack.setDismissed",
   slackGetChannels: "slack.getChannels",
-  slackSetChannelExcluded: "slack.setChannelExcluded",
+  slackSetChannelIncluded: "slack.setChannelIncluded",
   slackListMembers: "slack.listMembers",
   slackSetConversationOwner: "slack.setConversationOwner",
   slackSetConversationWait: "slack.setConversationWait",
@@ -1403,8 +1403,8 @@ const WsSlackGetChannelsRpc = Rpc.make(WS_METHODS.slackGetChannels, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
-const WsSlackSetChannelExcludedRpc = Rpc.make(WS_METHODS.slackSetChannelExcluded, {
-  payload: SlackSetChannelExcludedInput,
+const WsSlackSetChannelIncludedRpc = Rpc.make(WS_METHODS.slackSetChannelIncluded, {
+  payload: SlackSetChannelIncludedInput,
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
@@ -1719,7 +1719,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackUnfollowRpc,
   WsSlackSetDismissedRpc,
   WsSlackGetChannelsRpc,
-  WsSlackSetChannelExcludedRpc,
+  WsSlackSetChannelIncludedRpc,
   WsSlackListMembersRpc,
   WsSlackSetConversationOwnerRpc,
   WsSlackSetConversationWaitRpc,

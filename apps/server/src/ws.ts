@@ -3636,10 +3636,10 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.slackGetChannels, slackService.getChannels, {
             "rpc.aggregate": "slack",
           }),
-        [WS_METHODS.slackSetChannelExcluded]: (input) =>
+        [WS_METHODS.slackSetChannelIncluded]: (input) =>
           observeRpcEffect(
-            WS_METHODS.slackSetChannelExcluded,
-            slackService.setChannelExcluded(input),
+            WS_METHODS.slackSetChannelIncluded,
+            slackService.setChannelIncluded(input),
             { "rpc.aggregate": "slack" },
           ),
         [WS_METHODS.slackListMembers]: (_input) =>
