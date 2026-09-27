@@ -50,7 +50,8 @@ import {
 export type WorkSelection =
   | { readonly kind: "conversation"; readonly group: WorkGroup }
   | { readonly kind: "new"; readonly thread: SlackThread; readonly cleared: boolean }
-  | { readonly kind: "work"; readonly group: WorkGroup };
+  | { readonly kind: "work"; readonly group: WorkGroup }
+  | { readonly kind: "pullRequest"; readonly group: WorkGroup };
 
 function openExternal(url: string) {
   void readLocalApi()?.shell.openExternal(url);
@@ -514,6 +515,78 @@ function T3WorkDetail({
   );
 }
 
+const CHECKS_LABELS = {
+  passing: "Checks passing",
+  failing: "Checks failing",
+  pending: "Checks running",
+};
+const REVIEW_LABELS = {
+  approved: "Approved",
+  "changes-requested": "Changes requested",
+  "review-required": "Review required",
+};
+
+/** A pull request from the GitHub queue: where it stands, and a way to open it. */
+function PullRequestDetail({
+  group,
+  onClose,
+}: {
+  readonly group: WorkGroup;
+  readonly onClose: () => void;
+}) {
+  const pullRequest = group.pullRequest!;
+  const openPrLink = useOpenPrLink();
+  const facts = [
+    pullRequest.isDraft ? "Draft" : null,
+    pullRequest.review ? REVIEW_LABELS[pullRequest.review] : null,
+    pullRequest.checks ? CHECKS_LABELS[pullRequest.checks] : null,
+    pullRequest.conflicting ? "Merge conflict" : null,
+  ].filter((fact) => fact !== null);
+  return (
+    <>
+      <PanelHeader
+        onClose={onClose}
+        channel={
+          <span className="truncate font-mono">
+            {pullRequest.repository}#{pullRequest.number}
+          </span>
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="flex flex-col gap-5 p-4">
+          <div className="flex min-w-0 items-center gap-1.5 text-xs">
+            <StatusLine group={group} />
+          </div>
+          <Section
+            title={
+              group.pullRequestRole === "review" ? "Waiting for your review" : "Your pull request"
+            }
+          >
+            <a
+              className={LINK_ROW_CLASS}
+              href={pullRequest.url}
+              rel="noreferrer"
+              target="_blank"
+              onClick={(event) => openPrLink(event, pullRequest.url)}
+            >
+              <PullRequestStateGlyph state="open" isDraft={pullRequest.isDraft} />
+              <span className="min-w-0 flex-1 truncate">{pullRequest.title}</span>
+              {pullRequest.author ? (
+                <span className="shrink-0 text-2xs text-muted-foreground">
+                  {pullRequest.author}
+                </span>
+              ) : null}
+            </a>
+            {facts.length > 0 ? (
+              <p className="px-2 pt-1 text-xs text-muted-foreground">{facts.join(" · ")}</p>
+            ) : null}
+          </Section>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /** The selected item in full, beside the list. */
 export function WorkDetail({
   selection,
@@ -528,6 +601,9 @@ export function WorkDetail({
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly onClose: () => void;
 }) {
+  if (selection.kind === "pullRequest") {
+    return <PullRequestDetail group={selection.group} onClose={onClose} />;
+  }
   if (selection.kind === "work") {
     return <T3WorkDetail group={selection.group} projects={projects} onClose={onClose} />;
   }

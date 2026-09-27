@@ -86,6 +86,19 @@ function workItemOf(group: WorkGroup): WorkItem {
       projectId: thread.projectId,
     })),
     pullRequests: [
+      ...(group.pullRequest
+        ? [
+            {
+              url: group.pullRequest.url,
+              state: "open",
+              title: group.pullRequest.title,
+              ...(group.pullRequestRole ? { role: group.pullRequestRole } : {}),
+              ...(group.pullRequest.author ? { author: group.pullRequest.author } : {}),
+              ...(group.pullRequest.review ? { review: group.pullRequest.review } : {}),
+              ...(group.pullRequest.checks ? { checks: group.pullRequest.checks } : {}),
+            },
+          ]
+        : []),
       ...group.pullRequests.map((request) => ({
         url: request.url,
         ...(request.snapshot ? { state: request.snapshot.state } : {}),
@@ -124,6 +137,10 @@ export function buildWorkOverview(input: {
     dismissed: input.slack.dismissed,
     owners: input.slack.conversationOwners,
     waits: input.slack.conversationWaits,
+    github: {
+      reviewRequests: input.slack.reviewRequests,
+      authored: input.slack.authoredPullRequests,
+    },
     now: input.now,
   });
   const projects = input.projects.map((project) => ({
@@ -149,7 +166,9 @@ export function buildWorkOverview(input: {
   );
   const relevant = groups.filter(
     (group) =>
-      group.conversation !== null || group.threads.some((thread) => included.has(thread.projectId)),
+      group.conversation !== null ||
+      group.pullRequest !== null ||
+      group.threads.some((thread) => included.has(thread.projectId)),
   );
   const counts = { needs: 0, working: 0, waiting: 0, watching: 0, done: 0 };
   for (const group of relevant) counts[workStatusName(group)] += 1;

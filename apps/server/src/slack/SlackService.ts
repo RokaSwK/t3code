@@ -27,6 +27,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import {
   DevinSessionState,
   PullRequestState,
+  WorkGitHubPullRequest,
   SlackChannelKind,
   type DevinConnectInput,
   type DevinConnection,
@@ -118,6 +119,7 @@ import {
   slackSearchMatchThread,
   summarizeSlackConversation,
 } from "./slackConversations.ts";
+import { GITHUB_QUEUE_INTERVAL_MS, GITHUB_QUEUE_QUERY, parseGitHubQueue } from "./githubQueue.ts";
 import { slackMentionedUserIds, slackMrkdwnToMarkdown, standardEmoji } from "./slackMrkdwn.ts";
 import { SlackRateLimiter, type SlackCallPriority } from "./slackRateLimiter.ts";
 
@@ -289,6 +291,8 @@ const StoredCache = Schema.Struct({
       checkedAt: Schema.Number,
     }),
   ),
+  reviewRequests: Schema.optional(Schema.Array(WorkGitHubPullRequest)),
+  authoredPullRequests: Schema.optional(Schema.Array(WorkGitHubPullRequest)),
   devinSessions: Schema.Array(
     Schema.Struct({
       id: Schema.String,
@@ -468,6 +472,9 @@ function userDisplayName(user: SlackApiUser): string {
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
 const encodeThreads = Schema.encodeSync(Schema.fromJsonString(Schema.Array(SlackThread)));
+const encodePullRequests = Schema.encodeSync(
+  Schema.fromJsonString(Schema.Array(WorkGitHubPullRequest)),
+);
 /** Reads mostly return what we already have; only a real change is published. */
 function sameThreads(left: ReadonlyArray<SlackThread>, right: ReadonlyArray<SlackThread>) {
   return left.length === right.length && encodeThreads(left) === encodeThreads(right);
@@ -523,6 +530,10 @@ const make = Effect.gen(function* () {
     }
   >();
   let devinSessionsCheckedAt = 0;
+  /** The user's pull request queue on GitHub; empty until `gh` answers. */
+  let reviewRequests: ReadonlyArray<WorkGitHubPullRequest> = [];
+  let authoredPullRequests: ReadonlyArray<WorkGitHubPullRequest> = [];
+  let githubQueueAt = 0;
   let dismissed: ReadonlyArray<SlackDismissedThread> = [];
   let conversationOwners: ReadonlyArray<ConversationOwner> = [];
   let conversationWaits: ReadonlyArray<ConversationWait> = [];
@@ -662,6 +673,8 @@ const make = Effect.gen(function* () {
       dismissed: connection ? dismissed : [],
       conversationOwners: connection ? conversationOwners : [],
       conversationWaits: connection ? conversationWaits : [],
+      reviewRequests: connection ? reviewRequests : [],
+      authoredPullRequests: connection ? authoredPullRequests : [],
       excludedChannelIds: connection ? [...excludedChannelIds] : [],
       ...(connection && devinUser?.avatarUrl ? { devinAvatarUrl: devinUser.avatarUrl } : {}),
       devin: devin
@@ -704,6 +717,8 @@ const make = Effect.gen(function* () {
     ...(devinSeenTs ? { devinSeenTs } : {}),
     pullRequests: [...pullRequestStates].map(([url, known]) => ({ url, ...known })),
     devinSessions: [...devinSessions].map(([id, known]) => ({ id, ...known })),
+    reviewRequests,
+    authoredPullRequests,
   });
 
   const saveCache = Effect.suspend(() => {
@@ -800,6 +815,8 @@ const make = Effect.gen(function* () {
         checkedAt: session.checkedAt,
       });
     }
+    reviewRequests = cache.reviewRequests ?? [];
+    authoredPullRequests = cache.authoredPullRequests ?? [];
     lastSyncedAt = cache.savedAt;
     cacheSavedAt = now;
   });
@@ -1551,11 +1568,41 @@ const make = Effect.gen(function* () {
     }
   });
 
+  /** Reads the user's GitHub queue; without `gh` or access it stays as it was. */
+  const refreshGitHubQueue = Effect.fn("slack.refresh_github_queue")(function* () {
+    githubQueueAt = yield* Clock.currentTimeMillis;
+    const result = yield* Effect.exit(
+      github.execute({
+        cwd: globalThis.process.cwd(),
+        args: ["api", "--hostname", "github.com", "graphql", "-f", `query=${GITHUB_QUEUE_QUERY}`],
+        rateLimitHost: "github.com",
+      }),
+    );
+    if (Exit.isFailure(result)) return;
+    const queue = parseGitHubQueue(Option.getOrUndefined(decodeJson(result.value.stdout)));
+    if (!queue) return;
+    const same = (
+      left: ReadonlyArray<WorkGitHubPullRequest>,
+      right: ReadonlyArray<WorkGitHubPullRequest>,
+    ) => encodePullRequests(left) === encodePullRequests(right);
+    if (
+      !same(queue.reviewRequested, reviewRequests) ||
+      !same(queue.authored, authoredPullRequests)
+    ) {
+      reviewRequests = queue.reviewRequested;
+      authoredPullRequests = queue.authored;
+      dirty = true;
+    }
+  });
+
   const syncLoop = Effect.gen(function* () {
     for (;;) {
       const now = yield* Clock.currentTimeMillis;
       if (now - pullRequestsScannedAt >= SLACK_PULL_REQUEST_INTERVAL_MS) {
         yield* refreshPullRequests();
+      }
+      if (now - githubQueueAt >= GITHUB_QUEUE_INTERVAL_MS) {
+        yield* refreshGitHubQueue();
       }
       if (now - followedRefreshedAt >= SLACK_FOLLOWED_INTERVAL_MS) {
         const refreshed = yield* Effect.exit(refreshFollowed("background"));
@@ -1642,6 +1689,7 @@ const make = Effect.gen(function* () {
         channelsListedAt + SLACK_CHANNEL_LIST_INTERVAL_MS,
         followedRefreshedAt + SLACK_FOLLOWED_INTERVAL_MS,
         pullRequestsScannedAt + SLACK_PULL_REQUEST_INTERVAL_MS,
+        githubQueueAt + GITHUB_QUEUE_INTERVAL_MS,
         devinSearchedAt + DEVIN_SEARCH_INTERVAL_MS,
         devin ? devinSessionsCheckedAt + DEVIN_SESSIONS_INTERVAL_MS : Number.POSITIVE_INFINITY,
       );
@@ -1681,6 +1729,9 @@ const make = Effect.gen(function* () {
       members = undefined;
       pullRequestStates.clear();
       pullRequestsScannedAt = 0;
+      reviewRequests = [];
+      authoredPullRequests = [];
+      githubQueueAt = 0;
       if (restore) yield* restoreCache;
       syncFiber = yield* syncLoop.pipe(Effect.forkIn(layerScope));
     });
@@ -1913,6 +1964,7 @@ const make = Effect.gen(function* () {
 
   const refresh = Effect.gen(function* () {
     channelsListedAt = 0;
+    githubQueueAt = 0;
     followedRefreshedAt = 0;
     for (const channel of channels.values()) channel.nextPollAt = 0;
     yield* Deferred.succeed(wake, undefined);

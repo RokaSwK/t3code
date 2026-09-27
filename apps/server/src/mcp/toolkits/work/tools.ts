@@ -74,7 +74,16 @@ const WorkItem = Schema.Struct({
     Schema.Struct({ threadId: Schema.String, title: Schema.String, projectId: Schema.String }),
   ),
   pullRequests: Schema.Array(
-    Schema.Struct({ url: Schema.String, state: Schema.optional(Schema.String) }),
+    Schema.Struct({
+      url: Schema.String,
+      state: Schema.optional(Schema.String),
+      title: Schema.optional(Schema.String),
+      /** "review" when it waits for the user's review, "authored" when it is theirs. */
+      role: Schema.optional(Schema.String),
+      author: Schema.optional(Schema.String),
+      review: Schema.optional(Schema.String),
+      checks: Schema.optional(Schema.String),
+    }),
   ),
 });
 export type WorkItem = typeof WorkItem.Type;
@@ -109,7 +118,7 @@ export const WorkOverviewResult = Schema.Struct({
 export type WorkOverviewResult = typeof WorkOverviewResult.Type;
 
 const WorkOverviewTool = Tool.make("work_overview", {
-  description: `The user's work as the Work page shows it: their Slack conversations (followed with 👀, Devin threads they are in, handed to others) grouped needs / working / waiting / watching / done with the reason, plus the T3 threads, Devin sessions, and pull requests on each, T3 work in their folders, and the projects you can start threads in. Start triage here. ${WORK_ACCESS}`,
+  description: `The user's work as the Work page shows it: their Slack conversations (followed with 👀, Devin threads they are in, handed to others) and GitHub pull requests waiting for their review or theirs, grouped needs / working / waiting / watching / done with the reason, plus the T3 threads, Devin sessions, and pull requests on each, T3 work in their folders, and the projects you can start threads in. Start triage here. ${WORK_ACCESS}`,
   parameters: Schema.Struct({
     statuses: Schema.optional(
       Schema.Array(WorkStatusName).annotate({

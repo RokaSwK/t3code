@@ -139,6 +139,22 @@ export const SlackDevinSession = Schema.Struct({
 });
 export type SlackDevinSession = typeof SlackDevinSession.Type;
 
+/** An open pull request in the user's GitHub queue, with what it is waiting on. */
+export const WorkGitHubPullRequest = Schema.Struct({
+  url: Schema.String,
+  repository: Schema.String,
+  number: Schema.Number,
+  title: Schema.String,
+  isDraft: Schema.Boolean,
+  updatedAt: Schema.String,
+  author: Schema.optional(Schema.String),
+  authorAvatarUrl: Schema.optional(Schema.String),
+  review: Schema.optional(Schema.Literals(["approved", "changes-requested", "review-required"])),
+  checks: Schema.optional(Schema.Literals(["passing", "failing", "pending"])),
+  conflicting: Schema.optional(Schema.Boolean),
+});
+export type WorkGitHubPullRequest = typeof WorkGitHubPullRequest.Type;
+
 export const SlackThread = Schema.Struct({
   ...SlackMessage.fields,
   channelName: Schema.String,
@@ -278,6 +294,14 @@ export const SlackState = Schema.Struct({
       at: Schema.Number,
     }),
   ).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /** Open pull requests waiting for the user's review, from GitHub. */
+  reviewRequests: Schema.Array(WorkGitHubPullRequest).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  /** The user's own open pull requests, from GitHub. */
+  authoredPullRequests: Schema.Array(WorkGitHubPullRequest).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   /** Devin's logo, from its Slack profile, for marking its sessions. */
   devinAvatarUrl: Schema.optional(Schema.String),
   devin: DevinConnection.pipe(

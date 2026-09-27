@@ -238,6 +238,8 @@ function useWorkList(slackState: SlackState | null) {
   const dismissed = slackState?.dismissed;
   const owners = slackState?.conversationOwners;
   const waits = slackState?.conversationWaits;
+  const reviewRequests = slackConnected ? slackState!.reviewRequests : undefined;
+  const authored = slackConnected ? slackState!.authoredPullRequests : undefined;
   const groups = useMemo(
     () =>
       buildWorkGroups(shells, {
@@ -245,9 +247,10 @@ function useWorkList(slackState: SlackState | null) {
         ...(dismissed ? { dismissed } : {}),
         ...(owners ? { owners } : {}),
         ...(waits ? { waits } : {}),
+        ...(reviewRequests && authored ? { github: { reviewRequests, authored } } : {}),
         now: Date.now(),
       }),
-    [shells, conversations, dismissed, owners, waits],
+    [shells, conversations, dismissed, owners, waits, reviewRequests, authored],
   );
   const includedProjects = useMemo(
     () => includedWorkProjects(projects, configs),
@@ -256,7 +259,9 @@ function useWorkList(slackState: SlackState | null) {
   return useMemo(() => {
     const byRecent = (left: WorkGroup, right: WorkGroup) =>
       right.updatedAt.localeCompare(left.updatedAt);
-    const mine = groups.filter((group) => group.conversation !== null).toSorted(byRecent);
+    const mine = groups
+      .filter((group) => group.conversation !== null || group.pullRequest !== null)
+      .toSorted(byRecent);
     const included = new Set(
       includedProjects.map((project) => `${project.environmentId}:${project.id}`),
     );
@@ -306,7 +311,8 @@ function selectionFor(list: WorkList, id: string | null): WorkSelection | null {
   if (id === null) return null;
   if (id.startsWith("c:")) {
     const group = list.all.find((candidate) => `c:${candidate.id}` === id);
-    return group ? { kind: "conversation", group } : null;
+    if (!group) return null;
+    return group.conversation ? { kind: "conversation", group } : { kind: "pullRequest", group };
   }
   if (id.startsWith("w:")) {
     const group = list.other.find((candidate) => `w:${candidate.id}` === id);
@@ -330,19 +336,56 @@ function ConversationRows({
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
 }) {
-  return groups.map((group) => (
-    <WorkRow
-      key={group.id}
-      id={`c:${group.id}`}
-      selected={selectedId === `c:${group.id}`}
-      glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
-      title={slackMessageSummary(group.conversation!.markdown)}
-      signals={<ConversationSignals group={group} devinAvatarUrl={devinAvatarUrl} />}
-      meta={<SlackMeta thread={group.conversation!} reason={group.reason} />}
-      updatedAt={group.updatedAt}
-      onSelect={onSelect}
-    />
-  ));
+  return groups.map((group) =>
+    group.conversation ? (
+      <WorkRow
+        key={group.id}
+        id={`c:${group.id}`}
+        selected={selectedId === `c:${group.id}`}
+        glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        title={slackMessageSummary(group.conversation.markdown)}
+        signals={<ConversationSignals group={group} devinAvatarUrl={devinAvatarUrl} />}
+        meta={<SlackMeta thread={group.conversation} reason={group.reason} />}
+        updatedAt={group.updatedAt}
+        onSelect={onSelect}
+      />
+    ) : group.pullRequest ? (
+      <WorkRow
+        key={group.id}
+        id={`c:${group.id}`}
+        selected={selectedId === `c:${group.id}`}
+        glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        title={group.pullRequest.title}
+        signals={
+          <PullRequestStateGlyph
+            state="open"
+            isDraft={group.pullRequest.isDraft}
+            className="size-3.5"
+          />
+        }
+        meta={
+          <>
+            <span className="min-w-0 max-w-48 truncate font-mono">
+              {group.pullRequest.repository}#{group.pullRequest.number}
+            </span>
+            {group.pullRequest.author && group.pullRequestRole === "review" ? (
+              <>
+                {WORK_META_SEPARATOR}
+                <WorkRowAuthor
+                  name={group.pullRequest.author}
+                  avatarUrl={group.pullRequest.authorAvatarUrl}
+                />
+              </>
+            ) : null}
+            {WORK_META_SEPARATOR}
+            <span className="min-w-0 truncate">{group.reason}</span>
+          </>
+        }
+        updatedAt={group.updatedAt}
+        onSelect={onSelect}
+      />
+    ) : null,
+  );
 }
 
 function NewThreadRows({

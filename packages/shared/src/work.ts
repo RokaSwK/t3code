@@ -20,6 +20,7 @@ import {
   type SlackDismissedThread,
   type SlackThread,
   type ThreadPullRequestSnapshot,
+  type WorkGitHubPullRequest,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -69,6 +70,10 @@ export interface WorkGroup {
   readonly owner: WorkOwner | null;
   /** Someone you are waiting on, until another person replies after `at`. */
   readonly waitingOn: (WorkOwner & { readonly at: number }) | null;
+  /** A pull request from your GitHub queue that nothing else here is about. */
+  readonly pullRequest: WorkGitHubPullRequest | null;
+  /** Whether that pull request waits for your review or is your own. */
+  readonly pullRequestRole: "review" | "authored" | null;
 }
 
 export interface WorkOwner {
@@ -183,6 +188,37 @@ function statusOf(
   return { status: "done", reason: "Work completed" };
 }
 
+/** What your own open pull request is waiting on, from GitHub. */
+function authoredPullRequestAttention(pullRequest: WorkGitHubPullRequest): Attention {
+  if (pullRequest.conflicting) return { status: "needs", reason: "PR has a merge conflict" };
+  if (pullRequest.checks === "failing") return { status: "needs", reason: "PR checks failing" };
+  if (pullRequest.review === "changes-requested") {
+    return { status: "needs", reason: "Changes requested on PR" };
+  }
+  if (pullRequest.isDraft) return { status: "working", reason: "Draft PR" };
+  if (pullRequest.review === "approved" && pullRequest.checks !== "pending") {
+    return { status: "needs", reason: "PR approved, ready to merge" };
+  }
+  if (pullRequest.checks === "pending") return { status: "waiting", reason: "PR checks running" };
+  return { status: "waiting", reason: "PR waiting for review" };
+}
+
+/** Problems on a conversation's pull requests that GitHub reports, worst first. */
+function linkedPullRequestAttention(
+  details: ReadonlyArray<WorkGitHubPullRequest>,
+): Attention | null {
+  const attentions = details.map(authoredPullRequestAttention);
+  return (
+    attentions.find((attention) => attention.reason === "PR has a merge conflict") ??
+    attentions.find((attention) => attention.reason === "PR checks failing") ??
+    attentions.find((attention) => attention.reason === "Changes requested on PR") ??
+    attentions.find((attention) => attention.reason === "PR approved, ready to merge") ??
+    null
+  );
+}
+
+const pullRequestUrlKey = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
+
 export function slackTsToMs(ts: string): number {
   return Math.floor(Number.parseFloat(ts) * 1000);
 }
@@ -208,6 +244,7 @@ function conversationStatusOf(
   pullRequests: ReadonlyArray<WorkPullRequest>,
   markedDone: boolean,
   waitingOn: WorkGroup["waitingOn"],
+  pullRequestDetails: ReadonlyMap<string, WorkGitHubPullRequest>,
   now: number,
 ): Attention {
   const tick = slackThreadDoneReason({ ...conversation, pullRequests: [] });
@@ -222,7 +259,17 @@ function conversationStatusOf(
   if (sessions.some((session) => session.state === "error")) {
     return { status: "needs", reason: "Devin stopped with an error" };
   }
-  const pullRequestProblem = pullRequestNeeds(pullRequests);
+  const pullRequestProblem =
+    pullRequestNeeds(pullRequests) ??
+    linkedPullRequestAttention(
+      (conversation.pullRequests ?? []).flatMap((request) => {
+        const detail =
+          request.state === "open"
+            ? pullRequestDetails.get(pullRequestUrlKey(request.url))
+            : undefined;
+        return detail ? [detail] : [];
+      }),
+    );
   if (pullRequestProblem) return pullRequestProblem;
   const lastReply = conversation.lastReply;
   // Waiting on someone holds until another person replies after it was set.
@@ -319,6 +366,11 @@ export function buildWorkGroups(
     readonly waits?: ReadonlyArray<
       WorkOwner & { readonly channelId: string; readonly ts: string; readonly at: number }
     >;
+    /** Your GitHub queue: pull requests waiting for your review, and your own open ones. */
+    readonly github?: {
+      readonly reviewRequests: ReadonlyArray<WorkGitHubPullRequest>;
+      readonly authored: ReadonlyArray<WorkGitHubPullRequest>;
+    };
     /** Ms since the epoch; conversations age against it. */
     readonly now: number;
   },
@@ -385,13 +437,18 @@ export function buildWorkGroups(
       ref.at ?? Number.POSITIVE_INFINITY,
     ]),
   );
+  const pullRequestDetails = new Map(
+    (options.github?.authored ?? []).map(
+      (pullRequest) => [pullRequestUrlKey(pullRequest.url), pullRequest] as const,
+    ),
+  );
   const waitOf = new Map(
     (options.waits ?? []).map((entry) => [`${entry.channelId}:${entry.ts}`, entry] as const),
   );
   const ownerOf = new Map(
     (options.owners ?? []).map((entry) => [`${entry.channelId}:${entry.ts}`, entry] as const),
   );
-  return [...buckets.values()].map((members): WorkGroup => {
+  const grouped = [...buckets.values()].map((members): WorkGroup => {
     const group = members.filter((index) => index < threads.length).map((index) => threads[index]!);
     // Rarely two of your conversations share a PR; the most recent one leads.
     const conversation =
@@ -434,12 +491,15 @@ export function buildWorkGroups(
           requests,
           markedDone,
           waitOf.get(`${conversation.channelId}:${conversation.ts}`) ?? null,
+          pullRequestDetails,
           now,
         ),
         updatedAt: DateTime.formatIso(DateTime.makeUnsafe(lastActivityMs(conversation, ordered))),
         markedDone,
         owner: ownerOf.get(`${conversation.channelId}:${conversation.ts}`) ?? null,
         waitingOn: waitOf.get(`${conversation.channelId}:${conversation.ts}`) ?? null,
+        pullRequest: null,
+        pullRequestRole: null,
       };
     }
     return {
@@ -453,8 +513,56 @@ export function buildWorkGroups(
       markedDone: false,
       owner: null,
       waitingOn: null,
+      pullRequest: null,
+      pullRequestRole: null,
     };
   });
+
+  // Pull requests in your GitHub queue that no conversation or thread here is about.
+  const covered = new Set(
+    grouped.flatMap((group) => [
+      ...group.pullRequests.map((request) => pullRequestUrlKey(request.url)),
+      ...(group.conversation?.pullRequests ?? []).map((request) => pullRequestUrlKey(request.url)),
+    ]),
+  );
+  const standalone = (
+    pullRequest: WorkGitHubPullRequest,
+    role: "review" | "authored",
+  ): WorkGroup => ({
+    id: `github:${pullRequestUrlKey(pullRequest.url)}`,
+    conversation: null,
+    threads: [],
+    pullRequests: [],
+    slackLinks: [],
+    ...(role === "review"
+      ? {
+          status: "needs" as const,
+          reason: pullRequest.author
+            ? `Review requested by ${pullRequest.author}`
+            : "Review requested",
+        }
+      : authoredPullRequestAttention(pullRequest)),
+    updatedAt: pullRequest.updatedAt,
+    markedDone: false,
+    owner: null,
+    waitingOn: null,
+    pullRequest,
+    pullRequestRole: role,
+  });
+  const listed = new Set(covered);
+  const queue: WorkGroup[] = [];
+  for (const [role, list] of [
+    ["review", options.github?.reviewRequests ?? []],
+    ["authored", options.github?.authored ?? []],
+  ] as const) {
+    for (const pullRequest of list) {
+      const key = pullRequestUrlKey(pullRequest.url);
+      if (listed.has(key)) continue;
+      listed.add(key);
+      queue.push(standalone(pullRequest, role));
+    }
+  }
+  return [...grouped, ...queue];
 }
 
 /**

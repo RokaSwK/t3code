@@ -81,6 +81,8 @@ const slackState = (overrides: Partial<SlackState>): SlackState => ({
   excludedChannelIds: [],
   conversationOwners: [],
   conversationWaits: [],
+  reviewRequests: [],
+  authoredPullRequests: [],
   devin: { status: "disconnected" },
   ...overrides,
 });

@@ -325,3 +325,52 @@ describe("buildWorkGroups handoffs", () => {
     ]);
   });
 });
+
+describe("buildWorkGroups with the GitHub queue", () => {
+  const pr = (number: number, changes: Record<string, unknown> = {}) => ({
+    url: `https://github.com/owner/repo/pull/${number}`,
+    repository: "owner/repo",
+    number,
+    title: `PR ${number}`,
+    isDraft: false,
+    updatedAt: now,
+    author: "rick",
+    ...changes,
+  });
+
+  it("lists review requests and your own PRs that nothing else is about", () => {
+    const groups = buildWorkGroups([], {
+      github: {
+        reviewRequests: [pr(1)],
+        authored: [
+          pr(2, { review: "approved", checks: "passing" }),
+          pr(3),
+          pr(4, { isDraft: true }),
+        ],
+      },
+      now: nowMs,
+    });
+    expect(groups.map((group) => [group.pullRequestRole, group.status, group.reason])).toEqual([
+      ["review", "needs", "Review requested by rick"],
+      ["authored", "needs", "PR approved, ready to merge"],
+      ["authored", "waiting", "PR waiting for review"],
+      ["authored", "working", "Draft PR"],
+    ]);
+  });
+
+  it("gives a conversation's PR what GitHub says about it, and does not list it twice", () => {
+    const url = "https://github.com/owner/repo/pull/708";
+    const groups = buildWorkGroups([], {
+      conversations: [
+        conversation({
+          lastReply: { by: "devin", authorName: "Devin", ts: slackTs(nowMs - 60_000) },
+          pullRequests: [{ url, repository: "owner/repo", number: 708, state: "open" }],
+        }),
+      ],
+      github: { reviewRequests: [], authored: [pr(708, { checks: "failing" })] },
+      now: nowMs,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ status: "needs", reason: "PR checks failing" });
+  });
+});
