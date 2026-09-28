@@ -159,6 +159,10 @@
       "types": "./src/state/workCalendar.ts",
       "default": "./src/state/workCalendar.ts"
     },
+    "./state/work-recap": {
+      "types": "./src/state/workRecap.ts",
+      "default": "./src/state/workRecap.ts"
+    },
     "./state/slack": {
       "types": "./src/state/slack.ts",
       "default": "./src/state/slack.ts"

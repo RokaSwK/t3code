@@ -27,6 +27,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkRecapPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -103,7 +104,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateWorkRecap",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -122,7 +124,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateWorkRecap",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -164,7 +167,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkRecap";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -418,10 +422,24 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateWorkRecap: TextGeneration.TextGeneration["Service"]["generateWorkRecap"] =
+    Effect.fn("CodexTextGeneration.generateWorkRecap")(function* (input) {
+      const { prompt, outputSchema } = buildWorkRecapPrompt(input);
+      const generated = yield* runCodexJson({
+        operation: "generateWorkRecap",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { summary: generated.summary.trim() };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkRecap,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

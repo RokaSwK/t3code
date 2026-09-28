@@ -75,6 +75,19 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface WorkRecapGenerationInput {
+  cwd: string;
+  mode: "daily" | "weekly";
+  /** The recap's items as plain lines, built by the client from what the Work page shows. */
+  facts: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface WorkRecapGenerationResult {
+  summary: string;
+}
+
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -106,6 +119,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Summarize a daily standup or weekly demo from the Work recap's items. */
+    readonly generateWorkRecap: (
+      input: WorkRecapGenerationInput,
+    ) => Effect.Effect<WorkRecapGenerationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -113,7 +131,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateWorkRecap";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -165,6 +184,10 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
+      ),
+    generateWorkRecap: (input) =>
+      resolveInstance(registry, "generateWorkRecap", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateWorkRecap(input)),
       ),
   });
 });

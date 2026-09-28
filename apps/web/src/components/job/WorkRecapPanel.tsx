@@ -1,31 +1,225 @@
-import { type ComponentProps, useMemo, useState } from "react";
-import type { EnvironmentId, SlackState } from "@t3tools/contracts";
+import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
+import type { EnvironmentId, SlackState, WorkCalendarEvent } from "@t3tools/contracts";
+import {
+  CalendarIcon,
+  CheckIcon,
+  CopyIcon,
+  RefreshCwIcon,
+  SparklesIcon,
+  StarIcon,
+  XIcon,
+} from "lucide-react";
 import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSettings";
 import { useNowMinute } from "~/hooks/useNowMinute";
+import { cn } from "~/lib/utils";
+import { readLocalApi } from "~/localApi";
 import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { workRecap } from "~/state/workRecap";
+import { PullRequestStateGlyph } from "../pullRequest/pullRequestPresentation";
 import { Button } from "../ui/button";
 import {
   Dialog,
-  DialogPopup,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
+  DialogHeader,
   DialogPanel,
+  DialogPopup,
+  DialogTitle,
 } from "../ui/dialog";
+import { Skeleton } from "../ui/skeleton";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { useWorkCalendar } from "./WorkCalendar";
+import {
+  includedWorkProjects,
+  workItemKeys,
+  workItemTitle,
+  workMatchesMarks,
+  type WorkGroup,
+} from "./workGroups";
+import {
+  SlackChannelGlyph,
+  WORK_META_SEPARATOR,
+  WorkGroupHeader,
+  WorkRow,
+  WorkStatusDot,
+} from "./workPresentation";
 import {
   buildWorkAccomplishments,
   buildWorkPlan,
   localWorkDate,
+  type WorkAccomplishment,
+  workRecapFacts,
   workRecapWindows,
 } from "./workRecap";
-import {
-  includedWorkProjects,
-  workMatchesMarks,
-  workItemKeys,
-  workItemTitle,
-  type WorkGroup,
-} from "./workGroups";
-import { useWorkCalendar } from "./WorkCalendar";
+
+type RecapMode = "daily" | "weekly";
+
+function openExternal(url: string) {
+  void readLocalApi()?.shell.openExternal(url);
+}
+
+function eventTime(event: WorkCalendarEvent) {
+  return event.allDay
+    ? "All day"
+    : new Date(event.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function groupSource(group: WorkGroup): "slack" | "github" | "t3" {
+  return group.conversation ? "slack" : group.pullRequest ? "github" : "t3";
+}
+
+// Summaries survive closing the dialog; the same recap is never written twice in a session.
+const summaryCache = new Map<string, { readonly summary: string; readonly model: string }>();
+const summaryInFlight = new Set<string>();
+
+function RecapSummary({
+  environmentId,
+  mode,
+  facts,
+}: {
+  readonly environmentId: EnvironmentId | null;
+  readonly mode: RecapMode;
+  readonly facts: string;
+}) {
+  const summarize = useAtomCommand(workRecap.summarize, { reportFailure: false });
+  const key = `${mode}\n${facts}`;
+  const [failedKey, setFailedKey] = useState<string | null>(null);
+  const [, setWritten] = useState(0);
+  const result = summaryCache.get(key) ?? null;
+  const error = failedKey === key;
+  // Anything without a summary or a failure is being written.
+  const loading = environmentId !== null && result === null && !error;
+
+  const generate = useCallback(
+    async (input: { readonly mode: RecapMode; readonly facts: string }) => {
+      const runKey = `${input.mode}\n${input.facts}`;
+      if (!environmentId || summaryInFlight.has(runKey)) return;
+      summaryInFlight.add(runKey);
+      const response = await summarize({ environmentId, input });
+      summaryInFlight.delete(runKey);
+      if (response._tag === "Success") {
+        summaryCache.set(runKey, response.value);
+        setWritten((count) => count + 1);
+      } else setFailedKey(runKey);
+    },
+    [environmentId, summarize],
+  );
+
+  // A recap that has not been summarized yet (new mode or new work) is written on open.
+  useEffect(() => {
+    if (!summaryCache.has(`${mode}\n${facts}`)) void generate({ mode, facts });
+  }, [mode, facts, generate]);
+
+  function regenerate() {
+    summaryCache.delete(key);
+    setFailedKey(null);
+    void generate({ mode, facts });
+  }
+
+  return (
+    <section className="rounded-lg border bg-muted/30 p-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <SparklesIcon aria-hidden className="size-3.5" />
+        <span className="font-medium text-foreground">Summary</span>
+        {result && !loading ? <span className="truncate">· {result.model}</span> : null}
+        <Button
+          className="ml-auto"
+          size="icon-micro"
+          variant="ghost-muted"
+          aria-label="Write the summary again"
+          disabled={loading || !environmentId}
+          onClick={regenerate}
+        >
+          <RefreshCwIcon />
+        </Button>
+      </div>
+      <div className="mt-2 text-sm leading-relaxed">
+        {!environmentId ? (
+          <p className="text-muted-foreground">Connect to an environment to write a summary.</p>
+        ) : loading ? (
+          <div className="space-y-2 py-1" aria-label="Writing the summary">
+            <Skeleton className="h-3.5 w-full" />
+            <Skeleton className="h-3.5 w-11/12" />
+            <Skeleton className="h-3.5 w-2/3" />
+          </div>
+        ) : error ? (
+          <p role="alert" className="text-destructive">
+            The summary could not be written. Check the text generation model in Settings.
+          </p>
+        ) : result ? (
+          <p className="whitespace-pre-line">{result.summary}</p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function AccomplishmentRow({
+  item,
+  highlighted,
+  onToggleHighlight,
+  onSelect,
+}: {
+  readonly item: WorkAccomplishment;
+  readonly highlighted?: boolean;
+  readonly onToggleHighlight?: () => void;
+  readonly onSelect: (id: string) => void;
+}) {
+  const id = item.keys.join("|");
+  return (
+    <div className="flex items-center gap-1">
+      <div className="min-w-0 flex-1">
+        <WorkRow
+          id={id}
+          selected={false}
+          glyph={<WorkStatusDot status="done" reason={item.evidence} />}
+          source={item.source}
+          title={item.title}
+          signals={
+            item.pullRequest ? (
+              <PullRequestStateGlyph
+                state={item.pullRequest.state}
+                isDraft={item.pullRequest.isDraft}
+                className="size-3.5"
+              />
+            ) : null
+          }
+          meta={
+            <>
+              {item.channel ? (
+                <span className="inline-flex min-w-0 max-w-40 shrink items-center gap-1">
+                  <SlackChannelGlyph kind={item.channel.kind} />
+                  <span className="truncate">{item.channel.name}</span>
+                </span>
+              ) : item.pullRequest ? (
+                <span className="min-w-0 max-w-48 truncate font-mono">
+                  {item.pullRequest.label}
+                </span>
+              ) : null}
+              {item.channel || item.pullRequest ? WORK_META_SEPARATOR : null}
+              <span className="min-w-0 truncate">{item.evidence}</span>
+            </>
+          }
+          updatedAt={new Date(item.at).toISOString()}
+          onSelect={() =>
+            item.groupId ? onSelect(item.groupId) : item.url && openExternal(item.url)
+          }
+        />
+      </div>
+      {onToggleHighlight ? (
+        <Button
+          size="icon-xs"
+          variant="ghost-muted"
+          aria-pressed={highlighted}
+          aria-label={highlighted ? "Remove from the demo" : "Show in the demo"}
+          onClick={onToggleHighlight}
+        >
+          <StarIcon className={cn(highlighted && "fill-warning text-warning")} />
+        </Button>
+      ) : null}
+    </div>
+  );
+}
 
 export function WorkRecapPanel({
   environmentId,
@@ -47,10 +241,12 @@ export function WorkRecapPanel({
   const now = new Date(`${minute}:00Z`);
   const date = localWorkDate(now);
   const { today, lastWorkday } = workRecapWindows(now);
-  const [mode, setMode] = useState<"daily" | "weekly">("daily");
+  const [mode, setMode] = useState<RecapMode>("daily");
   const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState(false);
   const calendar = useWorkCalendar(environmentId);
+  const ignored = settings.workIgnoredItems ?? [];
+  const highlights = settings.workDemoHighlights ?? [];
+
   const accomplishments = useMemo(() => {
     const included = new Set(
       includedWorkProjects(projects, configs).map(
@@ -78,6 +274,7 @@ export function WorkRecapPanel({
     settings.workGitHubOwners,
     minute,
   ]);
+
   const completed =
     mode === "daily"
       ? accomplishments.filter((item) => item.at >= lastWorkday && item.at < today)
@@ -90,8 +287,9 @@ export function WorkRecapPanel({
       : today - lastWorkday <= 86_400_000 * 1.5
         ? "yesterday"
         : `since ${new Date(lastWorkday).toLocaleDateString([], { weekday: "long" })}`;
-  // Grouped by project so a standup reads as areas of work, not a log of threads.
-  const sections = new Map<string, Array<(typeof completed)[number]>>();
+
+  // Grouped by project, busiest first, so the list reads as areas of work.
+  const sections = new Map<string, WorkAccomplishment[]>();
   for (const item of completed) {
     const title =
       (item.project &&
@@ -100,274 +298,268 @@ export function WorkRecapPanel({
             project.environmentId === item.project!.environmentId &&
             project.id === item.project!.projectId,
         )?.title) ||
-      "Other";
+      (item.source === "slack" ? "Slack" : item.source === "github" ? "GitHub" : "Other");
     sections.set(title, [...(sections.get(title) ?? []), item]);
   }
-  const sectionEntries = [...sections].toSorted(
-    ([a, aItems], [b, bItems]) =>
-      Number(a === "Other") - Number(b === "Other") || bItems.length - aItems.length,
-  );
-  const sectionLines = (line: (item: (typeof completed)[number]) => string) =>
-    sectionEntries.flatMap(([title, items]) => [
-      ...(sectionEntries.length > 1 ? [title] : []),
-      ...items.map(line),
-    ]);
+  const sectionEntries = [...sections].toSorted(([, a], [, b]) => b.length - a.length);
+
   const planned = buildWorkPlan(
     settings.workDayPlan?.date === date ? settings.workDayPlan.items : [],
     groups,
-    settings.workIgnoredItems ?? [],
+    ignored,
   );
+  const plannedGroups = planned.map((item) => ({
+    item,
+    group: groups.find((candidate) => workMatchesMarks(workItemKeys(candidate), [item])),
+  }));
   const waiting = groups.filter(
     (group) =>
       group.status === "waiting" &&
       group.owner === null &&
-      !workMatchesMarks(workItemKeys(group), settings.workIgnoredItems ?? []),
+      !workMatchesMarks(workItemKeys(group), ignored),
   );
-  const highlights = settings.workDemoHighlights ?? [];
-  const eventLine = (event: NonNullable<typeof calendar.result>["events"][number]) =>
-    `${event.allDay ? "All day" : new Date(event.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} — ${event.title}${event.location ? ` (${event.location})` : ""}`;
-  async function copy() {
-    const lines =
+  const events = calendar.result?.connected ? calendar.result.events : [];
+
+  const facts = workRecapFacts({
+    period,
+    sections: sectionEntries,
+    highlights: mode === "weekly" ? highlights : [],
+    planned: mode === "daily" ? planned.map((item) => item.title) : [],
+    meetings: mode === "daily" ? events.map((event) => `${eventTime(event)} ${event.title}`) : [],
+    waiting:
       mode === "daily"
-        ? [
-            "Daily standup",
-            "",
-            `Done ${period}`,
-            ...sectionLines((item) => `- ${item.title}`),
-            "",
-            "Planned today",
-            ...planned.map((item) => `- ${item.title}`),
-            ...(calendar.error
-              ? ["- Calendar unavailable"]
-              : (calendar.result?.events ?? []).map((event) => `- ${eventLine(event)}`)),
-            "",
-            "Waiting on",
-            ...waiting.map(
-              (group) => `- ${workItemTitle(group)}${group.reason ? ` — ${group.reason}` : ""}`,
-            ),
-          ]
-        : [
-            `Weekly demo · ${period}`,
-            "",
-            ...sectionLines(
-              (item) =>
-                `${workMatchesMarks(item.keys, highlights) ? "★" : "-"} ${item.title}${item.url ? ` (${item.url})` : ""}`,
-            ),
-          ];
-    try {
-      await navigator.clipboard.writeText(lines.join("\n"));
-      setCopied(true);
-      setCopyError(false);
-    } catch {
-      setCopyError(true);
-    }
+        ? waiting.map(
+            (group) => `${workItemTitle(group)}${group.reason ? ` (${group.reason})` : ""}`,
+          )
+        : [],
+  });
+
+  async function copy() {
+    const summary = summaryCache.get(`${mode}\n${facts}`)?.summary;
+    const lines = [
+      mode === "daily" ? `Standup · ${period}` : `Weekly demo · ${period}`,
+      ...(summary ? ["", summary] : []),
+      "",
+      ...sectionEntries.flatMap(([title, items]) => [
+        title,
+        ...items.map(
+          (item) =>
+            `${workMatchesMarks(item.keys, highlights) && mode === "weekly" ? "★" : "•"} ${item.title}${item.url ? ` ${item.url}` : ""}`,
+        ),
+        "",
+      ]),
+      ...(mode === "daily" && planned.length > 0
+        ? ["Today", ...planned.map((item) => `• ${item.title}`), ""]
+        : []),
+    ];
+    await navigator.clipboard.writeText(lines.join("\n").trim()).catch(() => undefined);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }
+
+  const shippedCount = completed.length;
+  const mergedCount = completed.filter((item) => item.pullRequest?.state === "merged").length;
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          size="sm"
-          variant={mode === "daily" ? "default" : "outline"}
-          onClick={() => {
-            setMode("daily");
-            setCopied(false);
+    <div className="space-y-5">
+      <div className="flex items-center gap-2">
+        <ToggleGroup
+          aria-label="Recap"
+          value={[mode]}
+          onValueChange={(next) => {
+            const value = next[0];
+            if (value === "daily" || value === "weekly") setMode(value);
           }}
         >
-          Daily standup
-        </Button>
-        <Button
-          size="sm"
-          variant={mode === "weekly" ? "default" : "outline"}
-          onClick={() => {
-            setMode("weekly");
-            setCopied(false);
-          }}
-        >
-          Weekly demo
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={mode === "daily" && calendar.loading}
-          onClick={() => void copy()}
-        >
-          {copied ? "Copied" : "Copy summary"}
+          <Toggle value="daily">Daily standup</Toggle>
+          <Toggle value="weekly">Weekly demo</Toggle>
+        </ToggleGroup>
+        <Button className="ml-auto" size="sm" variant="outline" onClick={() => void copy()}>
+          {copied ? <CheckIcon /> : <CopyIcon />}
+          {copied ? "Copied" : "Copy"}
         </Button>
       </div>
-      {copyError ? (
-        <p role="alert" className="text-sm text-destructive">
-          Clipboard unavailable. You can select and copy the text below.
-        </p>
-      ) : null}
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold">Completed {period}</h3>
-        {completed.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No recorded completions in this period.</p>
-        ) : (
-          sectionEntries.map(([title, items]) => (
-            <div key={title} className="space-y-2">
-              {sectionEntries.length > 1 ? (
-                <h4 className="text-xs font-medium text-muted-foreground">{title}</h4>
-              ) : null}
-              <ul className="space-y-3">
-                {items.map((item) => (
-                  <li key={item.keys.join("|")} className="flex items-start gap-2">
-                    <div className="min-w-0 flex-1 text-sm">
-                      {item.url ? (
-                        <a
-                          className="underline underline-offset-2"
-                          href={item.url}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {item.title}
-                        </a>
-                      ) : item.groupId ? (
-                        <button
-                          type="button"
-                          className="text-left underline underline-offset-2"
-                          onClick={() => onSelect(item.groupId!)}
-                        >
-                          {item.title}
-                        </button>
-                      ) : (
-                        item.title
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {item.evidence} · {new Date(item.at).toLocaleDateString()}
-                      </p>
-                    </div>
-                    {mode === "weekly" ? (
-                      <Button
-                        size="xs"
-                        variant={workMatchesMarks(item.keys, highlights) ? "secondary" : "ghost"}
-                        onClick={() =>
-                          update({
-                            workDemoHighlights: workMatchesMarks(item.keys, highlights)
-                              ? highlights.filter((mark) => !workMatchesMarks(item.keys, [mark]))
-                              : [
-                                  ...highlights,
-                                  { keys: item.keys, title: item.title, at: item.at },
-                                ],
-                          })
-                        }
-                      >
-                        {workMatchesMarks(item.keys, highlights) ? "★ Highlighted" : "Highlight"}
-                      </Button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))
-        )}
-      </section>
-      {mode === "daily" ? (
-        <>
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold">Planned today</h3>
-            {planned.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Open any work item and choose “Plan for today”.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {planned.map((item, index) => {
-                  const group = groups.find((candidate) =>
-                    workMatchesMarks(workItemKeys(candidate), [item]),
-                  );
-                  return (
-                    <li key={item.keys.join("|")} className="flex items-center gap-2">
-                      <div className="min-w-0 flex-1 text-sm">
-                        {group ? (
-                          <button
-                            className="text-left underline underline-offset-2"
-                            onClick={() => onSelect(group.id)}
-                          >
-                            {item.title}
-                          </button>
-                        ) : (
-                          item.title
-                        )}
-                      </div>
-                      <Button
-                        size="xs"
-                        variant="ghost"
-                        onClick={() =>
-                          update({
-                            workDayPlan: { date, items: planned.filter((_, i) => i !== index) },
-                          })
-                        }
-                      >
-                        Remove
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-          <section className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Today's calendar</h3>
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={calendar.loading}
-                onClick={() => void calendar.refresh()}
-              >
-                {calendar.loading ? "Loading…" : "Refresh"}
-              </Button>
-            </div>
-            {calendar.error ? (
-              <p role="alert" className="text-sm text-destructive">
-                {calendar.error}
-              </p>
-            ) : calendar.result?.connected ? (
-              calendar.result.events.length ? (
-                <ul className="space-y-2 text-sm">
-                  {calendar.result.events.map((event) => (
-                    <li key={event.id}>{eventLine(event)}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">No events today.</p>
-              )
-            ) : !calendar.loading ? (
-              <p className="text-sm text-muted-foreground">
-                Connect Google Calendar in Settings → Work.
-              </p>
-            ) : null}
-          </section>
-          {waiting.length ? (
-            <section className="space-y-3">
-              <h3 className="text-sm font-semibold">Waiting on</h3>
-              <ul className="space-y-2 text-sm">
-                {waiting.map((group) => (
-                  <li key={group.id}>
-                    <button
-                      className="text-left underline underline-offset-2"
-                      onClick={() => onSelect(group.id)}
-                    >
-                      {workItemTitle(group)}
-                    </button>
-                    <p className="text-xs text-muted-foreground">{group.reason}</p>
-                  </li>
-                ))}
-              </ul>
-            </section>
+
+      <RecapSummary environmentId={environmentId} mode={mode} facts={facts} />
+
+      <div className="-mx-3 space-y-4">
+        <div className="space-y-1">
+          <WorkGroupHeader
+            label={`Done ${period}`}
+            count={shippedCount}
+            action={
+              mergedCount > 0 ? (
+                <span className="shrink-0">
+                  {mergedCount} merged {mergedCount === 1 ? "PR" : "PRs"}
+                </span>
+              ) : undefined
+            }
+          />
+          {shippedCount === 0 ? (
+            <p className="px-3 py-2 text-sm text-muted-foreground">
+              Nothing finished {period}. Work counts once a thread changes files, a PR merges, or
+              you mark your own conversation done.
+            </p>
           ) : null}
-        </>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          Highlight the accomplishments you want to show in your weekly demo. Stars are included
-          when you copy the summary.
-        </p>
-      )}
-      <p className="text-xs text-muted-foreground">
-        Based on marked-done work, merged PRs, and settled threads that changed files. Dates use
-        your local timezone.
-      </p>
+        </div>
+        {sectionEntries.map(([title, items]) => (
+          <div key={title} className="space-y-0.5">
+            <div className="px-3 pb-0.5 text-2xs font-medium text-muted-foreground/70">{title}</div>
+            {items.map((item) => (
+              <AccomplishmentRow
+                key={item.keys.join("|")}
+                item={item}
+                onSelect={onSelect}
+                {...(mode === "weekly"
+                  ? {
+                      highlighted: workMatchesMarks(item.keys, highlights),
+                      onToggleHighlight: () =>
+                        update({
+                          workDemoHighlights: workMatchesMarks(item.keys, highlights)
+                            ? highlights.filter((mark) => !workMatchesMarks(item.keys, [mark]))
+                            : [...highlights, { keys: item.keys, title: item.title, at: item.at }],
+                        }),
+                    }
+                  : {})}
+              />
+            ))}
+          </div>
+        ))}
+
+        {mode === "daily" ? (
+          <>
+            <div className="space-y-0.5">
+              <WorkGroupHeader label="Planned today" count={planned.length} />
+              {plannedGroups.length === 0 ? (
+                <p className="px-3 py-2 text-sm text-muted-foreground">
+                  Open a work item and choose “Plan for today”.
+                </p>
+              ) : (
+                plannedGroups.map(({ item, group }, index) => (
+                  <div key={item.keys.join("|")} className="flex items-center gap-1">
+                    <div className="min-w-0 flex-1">
+                      <WorkRow
+                        id={group?.id ?? item.keys.join("|")}
+                        selected={false}
+                        glyph={
+                          <WorkStatusDot
+                            status={group?.status ?? "new"}
+                            reason={group?.reason ?? "Planned"}
+                          />
+                        }
+                        source={group ? groupSource(group) : "t3"}
+                        title={item.title}
+                        meta={
+                          <span className="min-w-0 truncate">{group?.reason ?? "Planned"}</span>
+                        }
+                        updatedAt={group?.updatedAt ?? new Date(item.at).toISOString()}
+                        onSelect={() => group && onSelect(group.id)}
+                      />
+                    </div>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost-muted"
+                      aria-label="Remove from today's plan"
+                      onClick={() =>
+                        update({
+                          workDayPlan: { date, items: planned.filter((_, i) => i !== index) },
+                        })
+                      }
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="space-y-0.5">
+              <WorkGroupHeader
+                label="Meetings"
+                count={events.length}
+                action={
+                  <Button
+                    size="icon-micro"
+                    variant="ghost-muted"
+                    aria-label="Refresh calendar"
+                    disabled={calendar.loading}
+                    onClick={() => void calendar.refresh()}
+                  >
+                    <RefreshCwIcon />
+                  </Button>
+                }
+              />
+              {calendar.error ? (
+                <p role="alert" className="px-3 py-2 text-sm text-destructive">
+                  {calendar.error}
+                </p>
+              ) : !calendar.loading && !calendar.result?.connected ? (
+                <p className="px-3 py-2 text-sm text-muted-foreground">
+                  Connect Google Calendar in Settings → Work.
+                </p>
+              ) : events.length === 0 && !calendar.loading ? (
+                <p className="px-3 py-2 text-sm text-muted-foreground">No meetings today.</p>
+              ) : (
+                events.map((event) => (
+                  <div key={event.id} className="flex items-start gap-2 px-3 py-1.5">
+                    <CalendarIcon
+                      aria-hidden
+                      className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                    />
+                    <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
+                      {eventTime(event)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm">{event.title}</span>
+                      {event.location ? (
+                        <span className="block truncate text-2xs text-muted-foreground">
+                          {event.location}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {waiting.length > 0 ? (
+              <div className="space-y-0.5">
+                <WorkGroupHeader label="Waiting on others" count={waiting.length} />
+                {waiting.map((group) => (
+                  <WorkRow
+                    key={group.id}
+                    id={group.id}
+                    selected={false}
+                    glyph={<WorkStatusDot status="waiting" reason={group.reason} />}
+                    source={groupSource(group)}
+                    title={workItemTitle(group)}
+                    meta={
+                      group.conversation ? (
+                        <>
+                          <span className="inline-flex min-w-0 max-w-40 shrink items-center gap-1">
+                            <SlackChannelGlyph kind={group.conversation.channelKind} />
+                            <span className="truncate">{group.conversation.channelName}</span>
+                          </span>
+                          {WORK_META_SEPARATOR}
+                          <span className="min-w-0 truncate">{group.reason}</span>
+                        </>
+                      ) : (
+                        <span className="min-w-0 truncate">{group.reason}</span>
+                      )
+                    }
+                    updatedAt={group.updatedAt}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="px-3 text-xs text-muted-foreground">
+            Star what you want to show. Starred work leads the summary and the copied text.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -384,8 +576,10 @@ export function WorkRecapDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Your work recap</DialogTitle>
-          <DialogDescription>Prepare your daily standup and weekly demo.</DialogDescription>
+          <DialogTitle>Recap</DialogTitle>
+          <DialogDescription>
+            Your standup and weekly demo, written from your work.
+          </DialogDescription>
         </DialogHeader>
         <DialogPanel>{open ? <WorkRecapPanel {...props} /> : null}</DialogPanel>
       </DialogPopup>

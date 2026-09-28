@@ -26,6 +26,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkRecapPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -405,10 +406,21 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateWorkRecap: TextGeneration.TextGeneration["Service"]["generateWorkRecap"] =
+    Effect.fn("AntigravityTextGeneration.generateWorkRecap")(function* (input) {
+      const generated = yield* runAntigravityJson({
+        operation: "generateWorkRecap",
+        ...buildWorkRecapPrompt(input),
+        modelSelection: input.modelSelection,
+      });
+      return { summary: generated.summary.trim() };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkRecap,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

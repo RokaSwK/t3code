@@ -28,13 +28,16 @@ Choose **Ignore** on an item to hide it without counting it as completed. Restor
 
 ## Standups and weekly demos
 
-Open **Recap** in Work for yesterday's completions, today's plan and meetings, or accomplishments
-from the past seven days. Choose **Plan for today** on work items to build your daily plan. In the
-weekly view, highlight accomplishments you want to demo. **Copy summary** prepares notes you can
-paste into your standup or demo agenda.
+Open **Recap** in Work for what you finished since your last workday (Friday, on a Monday), with
+today's plan and meetings, or for this week's work in the weekly demo view. The **Text generation
+model** from **Settings → General** writes a short summary on top; the refresh button writes it again.
+Choose **Plan for today** on work items to build your daily plan. In the weekly view, star the work
+you want to demo; starred work leads the summary. **Copy** puts the summary and the linked list on
+your clipboard.
 
-The recap uses recorded done marks, settled T3 threads, and recent merged PRs. Quiet conversations
-are not counted as accomplishments. GitHub history uses your server's signed-in `gh` account and
+The recap counts merged PRs, settled T3 threads that changed files, and conversations you marked
+done when you started them or worked on them in a thread or PR. Questions, quiet conversations,
+and channel posts you only dismissed are not counted. GitHub history uses your server's signed-in `gh` account and
 Work's organization filter; up to 100 recent merged PRs are available.
 
 To include today's meetings, go to **Settings → Work → Google Calendar**. In Google Calendar's

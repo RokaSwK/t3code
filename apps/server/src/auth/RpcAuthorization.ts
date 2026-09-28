@@ -176,6 +176,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.slackResetInbox]: AuthOrchestrationOperateScope,
   [WS_METHODS.workCalendarRead]: AuthOrchestrationReadScope,
   [WS_METHODS.workCalendarSet]: AuthOrchestrationOperateScope,
+  // Runs the user's text generation model, so it needs operate rather than read.
+  [WS_METHODS.workRecapSummary]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackGetThread]: AuthOrchestrationReadScope,
   [WS_METHODS.slackGetReplies]: AuthOrchestrationReadScope,
   [WS_METHODS.slackSetReaction]: AuthOrchestrationOperateScope,

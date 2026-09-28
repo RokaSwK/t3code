@@ -109,6 +109,7 @@ const encodeTestJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unk
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import * as TextGeneration from "./textGeneration/TextGeneration.ts";
 import * as SlackService from "./slack/SlackService.ts";
 import * as AgentSessionSync from "./project/AgentSessionSync.ts";
 import { HTTP_ROUTER_CONFIG, makeRoutesLayer } from "./server.ts";
@@ -847,6 +848,7 @@ const buildAppUnderTest = (options?: {
             sessionsForThread: () => Effect.succeed([]),
           }),
           Layer.mock(SlackService.SlackService)({}),
+          Layer.mock(TextGeneration.TextGeneration)({}),
           Layer.mock(AgentSessionSync.AgentSessionSync)({}),
         ),
       ),

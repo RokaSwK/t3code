@@ -1,4 +1,12 @@
-import type { EnvironmentId, ProjectId, SlackState, WorkItemMark } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProjectId,
+  SlackChannelKind,
+  SlackState,
+  SlackThread,
+  ThreadPullRequestSnapshot,
+  WorkItemMark,
+} from "@t3tools/contracts";
 import {
   legacyThreadPullRequestKey,
   threadPullRequestKeyOf,
@@ -23,6 +31,23 @@ export interface WorkAccomplishment {
   readonly groupId?: string;
   /** The project the work happened in, for grouping. Slack-only and GitHub-only items have none. */
   readonly project?: { readonly environmentId: EnvironmentId; readonly projectId: ProjectId };
+  /** Where it came from, shown the way the Work list shows it. */
+  readonly source: "slack" | "github" | "t3";
+  readonly channel?: { readonly name: string; readonly kind: SlackChannelKind };
+  readonly pullRequest?: {
+    readonly label: string;
+    readonly state: ThreadPullRequestSnapshot["state"];
+    readonly isDraft: boolean;
+  };
+}
+
+function channelOf(thread: SlackThread) {
+  return { channel: { name: thread.channelName, kind: thread.channelKind } };
+}
+
+/** A thread or pull request names the work better than the Slack message that asked for it. */
+function groupTitle(group: WorkGroup): string {
+  return group.threads[0]?.title ?? group.pullRequests[0]?.snapshot?.title ?? workItemTitle(group);
 }
 
 export function localWorkDate(now = new Date()) {
@@ -68,14 +93,22 @@ export function buildWorkAccomplishments(input: {
             item.channelId === group.conversation?.channelId && item.ts === group.conversation.ts,
         )?.at
       : undefined;
-    if (doneAt !== undefined)
+    // Marking a conversation done is often just triage; it counts when you did the work.
+    const didWork =
+      group.threads.length > 0 ||
+      group.pullRequests.length > 0 ||
+      group.conversation?.startedByMe === true;
+    if (doneAt !== undefined && didWork)
       candidates.push({
         keys,
-        title: workItemTitle(group),
+        title: groupTitle(group),
         at: doneAt,
         evidence: "Marked done",
         groupId: group.id,
-        ...(group.conversation ? { url: group.conversation.permalink } : {}),
+        source: "slack",
+        ...(group.conversation
+          ? { url: group.conversation.permalink, ...channelOf(group.conversation) }
+          : {}),
         ...project,
       });
     for (const request of group.pullRequests) {
@@ -87,11 +120,19 @@ export function buildWorkAccomplishments(input: {
         evidence: "PR merged",
         url: request.url,
         groupId: group.id,
+        source: "github",
+        pullRequest: {
+          label: `${request.repository}#${request.number}`,
+          state: "merged",
+          isDraft: false,
+        },
         ...project,
       });
     }
   }
+  // Channel posts you only dismissed are inbox triage; your own conversations are work.
   for (const thread of [...(input.slack?.conversations ?? []), ...(input.slack?.threads ?? [])]) {
+    if (thread.startedByMe !== true) continue;
     const doneAt = input.slack?.dismissed.find(
       (item) => item.channelId === thread.channelId && item.ts === thread.ts,
     )?.at;
@@ -102,6 +143,8 @@ export function buildWorkAccomplishments(input: {
         at: doneAt,
         evidence: "Marked done",
         url: thread.permalink,
+        source: "slack",
+        ...channelOf(thread),
       });
   }
   for (const thread of input.threads) {
@@ -120,12 +163,23 @@ export function buildWorkAccomplishments(input: {
       !group?.pullRequests.length
     )
       continue;
+    const link = thread.pullRequests.find((candidate) => candidate.snapshot);
     candidates.push({
       keys: group ? workItemKeys(group) : [`thread:${thread.environmentId}:${thread.id}`],
-      title: group ? workItemTitle(group) : thread.title,
+      title: thread.title,
       at: Date.parse(thread.settledAt),
       evidence: "Thread settled",
+      source: "t3",
       ...(group ? { groupId: group.id } : {}),
+      ...(link?.snapshot
+        ? {
+            pullRequest: {
+              label: `${link.repository}#${link.number}`,
+              state: link.snapshot.state,
+              isDraft: link.snapshot.isDraft,
+            },
+          }
+        : {}),
       ...projectOf(thread),
     });
   }
@@ -140,6 +194,12 @@ export function buildWorkAccomplishments(input: {
       at: Date.parse(request.mergedAt),
       evidence: "PR merged",
       url: request.url,
+      source: "github",
+      pullRequest: {
+        label: `${request.repository}#${request.number}`,
+        state: "merged",
+        isDraft: false,
+      },
     });
   }
   const result: WorkAccomplishment[] = [];
@@ -155,10 +215,15 @@ export function buildWorkAccomplishments(input: {
     if (matches.length === 0) result.push(item);
     else {
       const newest = matches[0]!;
-      const project = [...matches, item].find((known) => known.project)?.project;
+      const all = [...matches, item];
+      const project = all.find((known) => known.project)?.project;
+      const pullRequest = all.find((known) => known.pullRequest)?.pullRequest;
+      const url = all.find((known) => known.url)?.url;
       const merged = {
         ...newest,
         ...(project ? { project } : {}),
+        ...(pullRequest ? { pullRequest } : {}),
+        ...(url ? { url } : {}),
         keys: [...new Set([...item.keys, ...matches.flatMap((known) => known.keys)])],
       };
       for (const match of matches) result.splice(result.indexOf(match), 1);
@@ -186,8 +251,7 @@ export function buildWorkPlan(
     const keys = group ? [...new Set([...item.keys, ...workItemKeys(group)])] : item.keys;
     if (workMatchesMarks(keys, ignored)) continue;
     const existing = result.findIndex((known) => workMatchesMarks(keys, [known]));
-    if (existing < 0)
-      result.push({ ...item, keys, title: group ? workItemTitle(group) : item.title });
+    if (existing < 0) result.push({ ...item, keys, title: group ? groupTitle(group) : item.title });
     else
       result[existing] = {
         ...result[existing]!,
@@ -195,4 +259,37 @@ export function buildWorkPlan(
       };
   }
   return result;
+}
+
+/** The recap as plain lines for the text model: what the list shows, without the chrome. */
+export function workRecapFacts(input: {
+  readonly period: string;
+  readonly sections: ReadonlyArray<readonly [string, ReadonlyArray<WorkAccomplishment>]>;
+  readonly highlights: ReadonlyArray<WorkItemMark>;
+  readonly planned: ReadonlyArray<string>;
+  readonly meetings: ReadonlyArray<string>;
+  readonly waiting: ReadonlyArray<string>;
+}): string {
+  const list = (title: string, lines: ReadonlyArray<string>) =>
+    lines.length > 0 ? [title, ...lines.map((line) => `- ${line}`), ""] : [];
+  return [
+    `Period: ${input.period}`,
+    "",
+    ...input.sections.flatMap(([project, items]) =>
+      list(
+        `Done in ${project}:`,
+        items.map(
+          (item) =>
+            `${item.title} (${item.evidence}${item.pullRequest ? `, ${item.pullRequest.label}` : ""})${
+              workMatchesMarks(item.keys, input.highlights) ? " [highlighted by the user]" : ""
+            }`,
+        ),
+      ),
+    ),
+    ...list("Planned today:", input.planned),
+    ...list("Meetings today:", input.meetings),
+    ...list("Waiting on others:", input.waiting),
+  ]
+    .join("\n")
+    .trim();
 }

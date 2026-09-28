@@ -11,6 +11,7 @@ import {
   buildWorkAccomplishments,
   buildWorkPlan,
   localWorkDate,
+  workRecapFacts,
   workRecapWindows,
 } from "./workRecap";
 const now = Date.parse("2026-09-28T12:00:00Z");
@@ -199,4 +200,53 @@ it("consolidates planned Slack and GitHub items when sync joins them", () => {
   ];
   expect(buildWorkPlan(marks, [group], [])).toHaveLength(1);
   expect(buildWorkPlan(marks, [group], [marks[0]!])).toEqual([]);
+});
+
+it("gives the text model the list as plain lines, marking highlights", () => {
+  const item = {
+    keys: ["pr:github.com/acme/app#42"],
+    title: "Ship refunds",
+    at: now,
+    evidence: "PR merged" as const,
+    source: "github" as const,
+    pullRequest: { label: "acme/app#42", state: "merged" as const, isDraft: false },
+  };
+  expect(
+    workRecapFacts({
+      period: "since Friday",
+      sections: [["app", [item]]],
+      highlights: [{ keys: item.keys, title: item.title, at: now }],
+      planned: ["Fix login"],
+      meetings: [],
+      waiting: [],
+    }),
+  ).toBe(
+    [
+      "Period: since Friday",
+      "",
+      "Done in app:",
+      "- Ship refunds (PR merged, acme/app#42) [highlighted by the user]",
+      "",
+      "Planned today:",
+      "- Fix login",
+    ].join("\n"),
+  );
+});
+
+it("leaves out Slack posts that were only dismissed", () => {
+  const post = { ...conversation, startedByMe: false };
+  expect(
+    buildWorkAccomplishments({
+      groups: [],
+      threads: [],
+      slack: slack({
+        threads: [post],
+        dismissed: [{ channelId: "C1", ts: post.ts, at: Date.parse(done) }],
+      }),
+      ignored: [],
+      githubOwners: undefined,
+      since: now - 86400000 * 7,
+      now,
+    }),
+  ).toEqual([]);
 });

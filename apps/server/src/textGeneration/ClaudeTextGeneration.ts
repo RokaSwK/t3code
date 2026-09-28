@@ -25,6 +25,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkRecapPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -102,7 +103,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "generateWorkRecap",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -132,7 +134,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkRecap";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -185,9 +188,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
-      // Titles need only the supplied prompt, not configuration from the checkout.
+      // Titles and recaps need only the supplied prompt, not configuration from the checkout.
       const workingDirectory =
-        operation === "generateThreadTitle"
+        operation === "generateThreadTitle" || operation === "generateWorkRecap"
           ? yield* fileSystem
               .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
               .pipe(
@@ -410,10 +413,24 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateWorkRecap: TextGeneration.TextGeneration["Service"]["generateWorkRecap"] =
+    Effect.fn("ClaudeTextGeneration.generateWorkRecap")(function* (input) {
+      const { prompt, outputSchema } = buildWorkRecapPrompt(input);
+      const generated = yield* runClaudeJson({
+        operation: "generateWorkRecap",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+      return { summary: generated.summary.trim() };
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkRecap,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

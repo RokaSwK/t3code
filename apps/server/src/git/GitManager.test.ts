@@ -310,6 +310,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateWorkRecap: () => Effect.succeed({ summary: "Shipped the workflow." }),
     ...overrides,
   };
 
@@ -358,6 +359,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateWorkRecap: implementation.generateWorkRecap,
   };
 }
 
