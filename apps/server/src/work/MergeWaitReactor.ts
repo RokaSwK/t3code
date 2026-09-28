@@ -19,7 +19,7 @@ const Journal = Schema.Struct({
   pending: Schema.Array(
     Schema.Struct({
       url: Schema.String,
-      // "shipped": the PR merged outside a merge wait, so tick without marking done.
+      // Kept for journals written before PR merges stopped adding Slack ticks.
       state: Schema.Literals(["waiting", "merged", "shipped", "cancelled"]),
     }),
   ),
@@ -61,7 +61,6 @@ export const make = Effect.gen(function* () {
       }
       seed = false;
     }
-    const merged = new Set<string>();
     for (;;) {
       const events = yield* Stream.runCollect(engine.readEvents(cursor, PAGE_SIZE));
       for (const event of events) {
@@ -72,28 +71,15 @@ export const make = Effect.gen(function* () {
         } else if (event.type === "thread.unsnoozed" && event.payload.mergeWait) {
           for (const url of event.payload.linkedSlackThreads ?? [])
             pending.set(url, event.payload.mergeWait);
-        } else if (
-          event.type === "thread.pull-request-synced" &&
-          event.payload.snapshot.state === "merged"
-        ) {
-          merged.add(event.payload.threadId);
         }
         cursor = event.sequence;
       }
       if (events.length < PAGE_SIZE) break;
     }
-    const snapshot = yield* snapshots.getShellSnapshot();
-    for (const thread of snapshot.threads) {
-      if (
-        !merged.has(thread.id) ||
-        thread.waitingForMergeAt != null ||
-        mergeWaitOutcome(thread.pullRequests) !== "merged"
-      )
-        continue;
-      for (const url of thread.linkedSlackThreads ?? []) {
-        if (!pending.has(url)) pending.set(url, "shipped");
-      }
+    for (const [url, state] of pending) {
+      if (state === "shipped") pending.delete(url);
     }
+    const snapshot = yield* snapshots.getShellSnapshot();
     // Save before external writes; retries are idempotent and incomplete jobs remain durable.
     yield* save();
     for (const thread of snapshot.threads) {
@@ -144,13 +130,6 @@ export const make = Effect.gen(function* () {
       const input = { channelId: ref.channelId, ts: ref.ts };
       const done = yield* Effect.gen(function* () {
         yield* slack.setReaction({ ...input, name: "clock3", reacted: state === "waiting" });
-        if (state !== "cancelled") {
-          yield* slack.setReaction({
-            ...input,
-            name: "white_check_mark",
-            reacted: state !== "waiting",
-          });
-        }
         if (state === "waiting" || state === "merged") {
           yield* slack.setDismissed({ ...input, dismissed: state === "merged" });
         }

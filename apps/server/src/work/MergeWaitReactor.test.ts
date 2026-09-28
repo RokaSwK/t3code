@@ -195,6 +195,14 @@ const harness = Effect.gen(function* () {
     fail: (value: boolean) => {
       failSlack = value;
     },
+    restoreShippedJob: () => {
+      secrets.set(
+        "merge-wait-reactions",
+        new TextEncoder().encode(
+          JSON.stringify({ cursor: 0, pending: [{ url: URL, state: "shipped" }] }),
+        ),
+      );
+    },
     events,
   };
 });
@@ -203,7 +211,7 @@ const drain = (reactor: Effect.Success<typeof MergeWaitReactor.make>) =>
 
 it.layer(NodeServices.layer)("merge waits", (it) => {
   it.effect(
-    "persists the wait, protects it from age settlement, and settles with a tick after merge",
+    "persists the wait, protects it from age settlement, and settles without a Slack tick after merge",
     () =>
       Effect.gen(function* () {
         const h = yield* harness;
@@ -221,7 +229,7 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
           waitingForMergeAt: null,
           settledOverride: "settled",
         });
-        expect(h.reactions).toEqual(new Set(["white_check_mark"]));
+        expect(h.reactions.size).toBe(0);
         expect(h.dismissed).toBe(true);
       }),
   );
@@ -276,22 +284,31 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
     }),
   );
 
-  it.effect(
-    "ticks Slack when a PR merges without a wait, leaving settle and done to the user",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* harness;
-        const reactor = yield* h.create;
-        yield* drain(reactor);
-        yield* h.sync({ state: "open", title: "Fix again" });
-        yield* drain(reactor);
-        expect(h.reactions.size).toBe(0);
-        yield* h.sync({ state: "merged", mergedAt: AT });
-        yield* drain(reactor);
-        expect(h.reactions).toEqual(new Set(["white_check_mark"]));
-        expect(h.dismissed).toBe(false);
-        expect(h.shell().threads[0]?.settledOverride).toBe(null);
-      }),
+  it.effect("leaves Slack untouched when a PR merges without a wait", () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const reactor = yield* h.create;
+      yield* drain(reactor);
+      yield* h.sync({ state: "open", title: "Fix again" });
+      yield* drain(reactor);
+      expect(h.reactions.size).toBe(0);
+      yield* h.sync({ state: "merged", mergedAt: AT });
+      yield* drain(reactor);
+      expect(h.reactions.size).toBe(0);
+      expect(h.dismissed).toBe(false);
+      expect(h.shell().threads[0]?.settledOverride).toBe(null);
+    }),
+  );
+
+  it.effect("discards a pending tick from an older server", () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      h.restoreShippedJob();
+      const reactor = yield* h.create;
+      yield* drain(reactor);
+      expect(h.reactions.size).toBe(0);
+      expect(h.dismissed).toBe(false);
+    }),
   );
 
   for (const type of ["thread.archive", "thread.delete"] as const) {
