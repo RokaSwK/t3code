@@ -6385,7 +6385,10 @@ export default function ChatView(props: ChatViewProps) {
       id: `thread-${isSnoozed ? "snoozed" : "settled"}:${activeThread?.id ?? "unknown"}`,
       variant: "info",
       icon: isSnoozed ? <AlarmClockIcon /> : <CheckCircle2Icon />,
-      title: `This thread is ${isSnoozed ? "snoozed" : "settled"}`,
+      title:
+        activeThreadShell?.waitingForMergeAt != null
+          ? "Waiting for merge"
+          : `This thread is ${isSnoozed ? "snoozed" : "settled"}`,
       description: `Send a message to ${isSnoozed ? "wake" : "unsettle"}`,
       actions: (
         <Button
@@ -6408,6 +6411,7 @@ export default function ChatView(props: ChatViewProps) {
     };
   }, [
     activeThread?.id,
+    activeThreadShell?.waitingForMergeAt,
     activeThreadSettled,
     activeThreadSnoozed,
     handleUnsnoozeActiveThread,

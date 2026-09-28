@@ -10,12 +10,17 @@ import {
   ProjectId,
   SLACK_FOLLOW_REACTION,
   type SlackState,
+  type WorkItemMark,
   ThreadId,
 } from "@t3tools/contracts";
 import {
   buildWorkGroups,
   includedWorkProjects,
   slackMessageSummary,
+  ungroupedWorkChannelThreads,
+  workItemKeys,
+  workMatchesMarks,
+  slackWorkItemKeys,
   type WorkGroup,
   type WorkThread,
 } from "@t3tools/shared/work";
@@ -125,6 +130,7 @@ export function buildWorkOverview(input: {
   readonly slack: SlackState;
   readonly workProjectRootIds: ReadonlyArray<ProjectId> | undefined;
   readonly workGitHubOwners?: ReadonlyArray<string> | undefined;
+  readonly workIgnoredItems?: ReadonlyArray<WorkItemMark> | undefined;
   readonly statuses: ReadonlyArray<WorkStatusName>;
   readonly includeNewThreads: boolean;
   readonly limit: number;
@@ -136,7 +142,9 @@ export function buildWorkOverview(input: {
     environmentId: LOCAL_ENVIRONMENT,
   }));
   const groups = buildWorkGroups(threads, {
-    ...(slackConnected ? { conversations: input.slack.conversations } : {}),
+    ...(slackConnected
+      ? { conversations: input.slack.conversations, channelThreads: input.slack.threads }
+      : {}),
     dismissed: input.slack.dismissed,
     owners: input.slack.conversationOwners,
     waits: input.slack.conversationWaits,
@@ -168,12 +176,14 @@ export function buildWorkOverview(input: {
       ]),
     ).map((project) => project.id),
   );
-  const relevant = groups.filter(
-    (group) =>
-      group.conversation !== null ||
-      group.pullRequest !== null ||
-      group.threads.some((thread) => included.has(thread.projectId)),
-  );
+  const relevant = groups
+    .filter((group) => !workMatchesMarks(workItemKeys(group), input.workIgnoredItems ?? []))
+    .filter(
+      (group) =>
+        group.conversation !== null ||
+        group.pullRequest !== null ||
+        group.threads.some((thread) => included.has(thread.projectId)),
+    );
   const counts = { needs: 0, working: 0, waiting: 0, watching: 0, done: 0 };
   for (const group of relevant) counts[workStatusName(group)] += 1;
   const wanted = new Set(input.statuses);
@@ -188,18 +198,18 @@ export function buildWorkOverview(input: {
           input.slack.replyDrafts.find((draft) => `${draft.channelId}:${draft.ts}` === key)?.text,
       ),
     );
-  const mine = new Set(
-    input.slack.conversations.map((thread) => `${thread.channelId}:${thread.ts}`),
-  );
   const dismissed = new Set(
     input.slack.dismissed.map((thread) => `${thread.channelId}:${thread.ts}`),
   );
   const newThreads =
     input.includeNewThreads && slackConnected
-      ? input.slack.threads
+      ? ungroupedWorkChannelThreads(input.slack.threads, groups)
           .filter((thread) => {
             const key = `${thread.channelId}:${thread.ts}`;
-            return !mine.has(key) && !dismissed.has(key);
+            return (
+              !dismissed.has(key) &&
+              !workMatchesMarks(slackWorkItemKeys(thread), input.workIgnoredItems ?? [])
+            );
           })
           .slice(0, 20)
           .map((thread) => ({
@@ -298,6 +308,7 @@ const make = Effect.gen(function* () {
           slack: yield* slack.current,
           workProjectRootIds: current.workProjectRootIds,
           workGitHubOwners: current.workGitHubOwners,
+          workIgnoredItems: current.workIgnoredItems,
           statuses: input.statuses ?? ["needs", "working", "waiting", "watching"],
           includeNewThreads: input.includeNewThreads === true,
           limit: input.limit ?? WORK_OVERVIEW_LIMIT,

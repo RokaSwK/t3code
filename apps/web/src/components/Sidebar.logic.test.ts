@@ -1584,6 +1584,7 @@ describe("applySidebarThreadDrop", () => {
     pinnedAt: null,
     pinOrderKey: null,
     activeOrderKey: null,
+    waitingForMergeAt: null,
     snoozedAt: null,
     snoozedUntil: null,
     settledAt: null,

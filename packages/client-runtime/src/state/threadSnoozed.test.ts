@@ -371,3 +371,9 @@ describe("resolveSnoozePresets", () => {
     expect(tomorrow.getDay()).toBe(1);
   });
 });
+
+it("keeps a merge wait snoozed without a timer, but still surfaces agent questions", () => {
+  const waiting = { ...makeShell({}), waitingForMergeAt: NOW };
+  expect(effectiveSnoozed(waiting, { now: "2030-01-01T00:00:00.000Z" })).toBe(true);
+  expect(effectiveSnoozed({ ...waiting, hasPendingUserInput: true }, { now: NOW })).toBe(false);
+});

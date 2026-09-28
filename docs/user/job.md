@@ -23,6 +23,27 @@ it links to is merged or closed, or after three quiet days when you or Devin had
 nobody replied. Choose **Done** to mark any other conversation yourself; a new reply from someone
 else brings it back. **Not done** undoes your own mark.
 
+Choose **Ignore** on an item to hide it without counting it as completed. Restore it from
+**… → Ignored work**. Linked Slack messages and GitHub PRs stay together when ignored.
+
+## Standups and weekly demos
+
+Open **Recap** in Work for yesterday's completions, today's plan and meetings, or accomplishments
+from the past seven days. Choose **Plan for today** on work items to build your daily plan. In the
+weekly view, highlight accomplishments you want to demo. **Copy summary** prepares notes you can
+paste into your standup or demo agenda.
+
+The recap uses recorded done marks, settled T3 threads, and recent merged PRs. Quiet conversations
+are not counted as accomplishments. GitHub history uses your server's signed-in `gh` account and
+Work's organization filter; up to 100 recent merged PRs are available.
+
+To include today's meetings, go to **Settings → Work → Google Calendar**. In Google Calendar's
+settings, select your calendar, then **Integrate calendar → Secret address in iCal format**. Paste
+that address into Work and connect. Work reads events only; it cannot create or change meetings.
+You can replace or disconnect the calendar in the same settings. Dates use your local timezone.
+
+## Working on a conversation
+
 Choose **Start thread** to work on a conversation in T3. The new thread opens as a draft in a new
 worktree, already linked to the Slack conversation, with the message quoted in the composer; its
 agent can read the whole conversation. It shows on the conversation here, and the **Slack
@@ -55,6 +76,10 @@ When a conversation is yours but blocked on someone, such as a reviewer, choose 
 from its **…** menu. It shows as **Waiting** until someone else replies, then comes back to
 **Needs me**. A conversation with an open pull request where you or Devin had the last word also
 counts as waiting for review.
+
+Use **Wait for merge** beside a linked T3 thread when your part is finished. The conversation
+and thread move to **Waiting** together, with 🕒 in Slack. All linked PRs merging settles the
+thread and replaces 🕒 with ✅; PR problems wake it for your attention. **Wake** cancels the wait.
 
 ## Work agent
 
@@ -91,8 +116,8 @@ To see whether each session is working, waiting for you, or finished, add a Devi
 **Settings → Work**. Create the key in your Devin organization's settings. It stays on your T3
 Code server. Without a key, T3 Code goes by Devin's messages in Slack instead.
 
-Finding Devin threads uses Slack search, and sending replies needs permission to post. When your
-Slack sign-in is missing either, **Settings → Work** says so and asks you to sign in again.
+Finding Devin threads uses Slack search, sending replies needs permission to post, and image
+previews need file access. When a permission is missing, **Settings → Work** asks you to sign in again.
 
 ## New in your channels
 
@@ -148,5 +173,7 @@ follows the conversation with 👀, so it appears in your work.
 
 Select a saved link to read the conversation beside your work. The sidebar’s Slack icon reopens
 these links. Refresh to fetch new replies, or unlink a conversation when it is no longer relevant.
-The environment must be connected to the same Slack workspace. For files or conversations longer
-than 200 messages, open the link in Slack. Native mobile does not yet have this panel.
+The environment must be connected to the same Slack workspace. Images open inline and can be
+enlarged. If your Slack connection predates image support, sign in again in **Settings → Work**
+to grant file access. For other files or conversations longer than 200 messages, open the link
+in Slack. Native mobile does not yet have this panel.

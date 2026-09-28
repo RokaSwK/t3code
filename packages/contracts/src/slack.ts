@@ -40,6 +40,7 @@ export const SLACK_USER_SCOPES = [
   "reactions:write",
   "search:read",
   "chat:write",
+  "files:read",
 ] as const;
 
 /** The manifest the "Create Slack app" link prefills. */
@@ -90,6 +91,19 @@ export const SlackReaction = Schema.Struct({
 });
 export type SlackReaction = typeof SlackReaction.Type;
 
+/** Only Slack's private file endpoints may receive the environment's Slack credential. */
+export const SlackImageUrl = Schema.String.check(
+  Schema.isMaxLength(2048),
+  Schema.isPattern(/^https:\/\/files\.slack\.com\/files-(?:pri|tmb)\/[^\s]+$/),
+);
+
+export const SlackImage = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  url: SlackImageUrl,
+});
+export type SlackImage = typeof SlackImage.Type;
+
 export const SlackMessage = Schema.Struct({
   channelId: Schema.String,
   ts: Schema.String,
@@ -98,6 +112,7 @@ export const SlackMessage = Schema.Struct({
   /** Markdown converted from Slack mrkdwn, with mentions resolved. */
   markdown: Schema.String,
   fileCount: Schema.Number,
+  images: Schema.optional(Schema.Array(SlackImage)),
   edited: Schema.Boolean,
   replyCount: Schema.Number,
   latestReplyTs: Schema.optional(Schema.String),
@@ -148,6 +163,7 @@ export const WorkGitHubPullRequest = Schema.Struct({
   title: Schema.String,
   isDraft: Schema.Boolean,
   updatedAt: Schema.String,
+  mergedAt: Schema.optional(Schema.String),
   author: Schema.optional(Schema.String),
   authorAvatarUrl: Schema.optional(Schema.String),
   review: Schema.optional(Schema.Literals(["approved", "changes-requested", "review-required"])),
@@ -303,6 +319,7 @@ export const SlackState = Schema.Struct({
   authoredPullRequests: Schema.Array(WorkGitHubPullRequest).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
+  mergedPullRequests: Schema.optional(Schema.Array(WorkGitHubPullRequest)),
   /** Replies saved to send in a conversation, by the user or drafted by the Work agent. */
   replyDrafts: Schema.Array(
     Schema.Struct({

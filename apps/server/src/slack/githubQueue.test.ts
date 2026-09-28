@@ -59,3 +59,26 @@ describe("parseGitHubQueue", () => {
     expect(parseGitHubQueue({ errors: [{ message: "nope" }] })).toBeNull();
   });
 });
+
+it("retains the merge date independently of a later update", () => {
+  const queue = parseGitHubQueue({
+    data: {
+      reviewRequested: { nodes: [] },
+      authored: { nodes: [] },
+      merged: {
+        nodes: [
+          {
+            url: "https://github.com/acme/app/pull/9",
+            number: 9,
+            repository: { nameWithOwner: "acme/app" },
+            mergedAt: "2026-09-26T10:00:00Z",
+            updatedAt: "2026-09-28T10:00:00Z",
+          },
+        ],
+      },
+    },
+  });
+  expect(queue?.merged).toMatchObject([
+    { mergedAt: "2026-09-26T10:00:00Z", updatedAt: "2026-09-28T10:00:00Z" },
+  ]);
+});

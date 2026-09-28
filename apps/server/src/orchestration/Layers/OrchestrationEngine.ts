@@ -203,7 +203,9 @@ const makeOrchestrationEngine = Effect.gen(function* () {
         }
 
         if (
-          envelope.command.type === "thread.auto-settle" &&
+          (envelope.command.type === "thread.auto-settle" ||
+            (envelope.command.type === "thread.merge-wait.resolve" &&
+              envelope.command.outcome === "merged")) &&
           threadBackgroundLiveness.getThreadBackgroundLiveness(envelope.command.threadId) !== null
         ) {
           return yield* new OrchestrationCommandInvariantError({

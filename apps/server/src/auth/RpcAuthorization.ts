@@ -174,6 +174,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.slackDisconnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackRefresh]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackResetInbox]: AuthOrchestrationOperateScope,
+  [WS_METHODS.workCalendarRead]: AuthOrchestrationReadScope,
+  [WS_METHODS.workCalendarSet]: AuthOrchestrationOperateScope,
   [WS_METHODS.slackGetThread]: AuthOrchestrationReadScope,
   [WS_METHODS.slackGetReplies]: AuthOrchestrationReadScope,
   [WS_METHODS.slackSetReaction]: AuthOrchestrationOperateScope,

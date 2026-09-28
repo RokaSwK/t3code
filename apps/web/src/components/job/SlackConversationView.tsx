@@ -7,7 +7,9 @@ import { slackEnvironment } from "~/state/slack";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
-import ChatMarkdown from "../ChatMarkdown";
+import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
+import { ExpandedImageDialog } from "../chat/ExpandedImageDialog";
+import type { ExpandedImagePreview } from "../chat/ExpandedImagePreview";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
@@ -115,14 +117,18 @@ function SlackReactionBar({
 }
 
 export function SlackMessageBody({
+  environmentId,
   message,
   onToggleReaction,
 }: {
+  readonly environmentId: EnvironmentId;
   readonly message: SlackMessage;
   readonly onToggleReaction: (name: string, reacted: boolean) => void;
 }) {
+  const remainingFiles = Math.max(0, message.fileCount - (message.images?.length ?? 0));
+  const [preview, setPreview] = useState<ExpandedImagePreview | null>(null);
   return (
-    <div className="flex min-w-0 gap-3">
+    <div className="flex min-w-0 gap-3" data-image-gallery>
       {message.authorAvatarUrl ? (
         <img
           alt=""
@@ -153,13 +159,26 @@ export function SlackMessageBody({
             className="text-sm"
           />
         ) : null}
-        {message.fileCount > 0 ? (
+        {message.images?.map((image) => (
+          <ChatMarkdownAssetImage
+            key={image.id}
+            environmentId={environmentId}
+            resource={{ _tag: "slack-image", url: image.url }}
+            alt={image.name}
+            maxHeightRem={20}
+            imageProps={{ loading: "lazy" }}
+            onImageExpand={setPreview}
+          />
+        ))}
+        {remainingFiles > 0 ? (
           <p className="text-xs text-muted-foreground">
-            {message.fileCount === 1 ? "1 file" : `${message.fileCount} files`}, open in Slack to
-            view
+            {remainingFiles === 1 ? "1 file" : `${remainingFiles} files`}, open in Slack to view
           </p>
         ) : null}
         <SlackReactionBar reactions={message.reactions} onToggle={onToggleReaction} />
+        {preview ? (
+          <ExpandedImageDialog preview={preview} onClose={() => setPreview(null)} />
+        ) : null}
       </div>
     </div>
   );
@@ -234,6 +253,7 @@ export function SlackConversationView({
   return (
     <div className="flex flex-col gap-4">
       <SlackMessageBody
+        environmentId={environmentId}
         message={thread}
         onToggleReaction={(name, reacted) => void toggleReaction(thread.ts, name, reacted)}
       />
@@ -246,6 +266,7 @@ export function SlackConversationView({
           ) : (
             replies.messages.map((reply) => (
               <SlackMessageBody
+                environmentId={environmentId}
                 key={reply.ts}
                 message={reply}
                 onToggleReaction={(name, reacted) => void toggleReaction(reply.ts, name, reacted)}

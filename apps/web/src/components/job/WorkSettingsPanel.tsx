@@ -1,3 +1,4 @@
+import { WorkCalendarSettings } from "./WorkCalendar";
 /**
  * Work settings - the Slack sign-in and Devin API key behind the Work page. Both belong to the
  * primary environment, which reads Slack and Devin for every client.
@@ -61,6 +62,7 @@ function SlackSettings({
   const missingNeeds = [
     missing.includes("search:read") ? "find your Devin threads" : null,
     missing.includes("chat:write") ? "send replies from T3 Code" : null,
+    missing.includes("files:read") ? "show images from Slack" : null,
   ].filter((need) => need !== null);
   const signInAgain = () => {
     setPending(true);
@@ -386,6 +388,15 @@ export function WorkSettingsPanel() {
           <Skeleton className="m-4 h-16" />
         ) : (
           <SlackSettings environmentId={environmentId} connection={state.connection} />
+        )}
+      </SettingsSection>
+      <SettingsSection id="calendar" title="Google Calendar">
+        {environmentId ? (
+          <WorkCalendarSettings environmentId={environmentId} />
+        ) : (
+          <p className="p-4 text-sm text-muted-foreground">
+            Connect an environment to set up your calendar.
+          </p>
         )}
       </SettingsSection>
       <SettingsSection id="github" title="GitHub">

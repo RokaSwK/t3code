@@ -86,6 +86,8 @@ import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import { slackImages } from "./slackImages.ts";
+import { slackImageResponse } from "./SlackImageFetch.ts";
 import {
   isSlackThreadRoot,
   SLACK_CHANNEL_LIST_INTERVAL_MS,
@@ -121,7 +123,7 @@ import {
   slackSearchMatchThread,
   summarizeSlackConversation,
 } from "./slackConversations.ts";
-import { GITHUB_QUEUE_INTERVAL_MS, GITHUB_QUEUE_QUERY, parseGitHubQueue } from "./githubQueue.ts";
+import { GITHUB_QUEUE_INTERVAL_MS, githubQueueQuery, parseGitHubQueue } from "./githubQueue.ts";
 import { slackMentionedUserIds, slackMrkdwnToMarkdown, standardEmoji } from "./slackMrkdwn.ts";
 import { SlackRateLimiter, type SlackCallPriority } from "./slackRateLimiter.ts";
 
@@ -312,6 +314,7 @@ const StoredCache = Schema.Struct({
   ),
   reviewRequests: Schema.optional(Schema.Array(WorkGitHubPullRequest)),
   authoredPullRequests: Schema.optional(Schema.Array(WorkGitHubPullRequest)),
+  mergedPullRequests: Schema.optional(Schema.Array(WorkGitHubPullRequest)),
   devinSessions: Schema.Array(
     Schema.Struct({
       id: Schema.String,
@@ -437,6 +440,9 @@ export class SlackService extends Context.Service<
     readonly getReplies: (
       ref: SlackThreadRef,
     ) => Effect.Effect<ReadonlyArray<SlackMessage>, SlackError>;
+    readonly imageResponse: (
+      url: string,
+    ) => Effect.Effect<HttpServerResponse.HttpServerResponse, SlackError, Scope.Scope>;
     readonly setReaction: (input: SlackSetReactionInput) => Effect.Effect<void, SlackError>;
     readonly unfollow: (ref: SlackThreadRef) => Effect.Effect<void, SlackError>;
     readonly setDismissed: (input: SlackSetDismissedInput) => Effect.Effect<void, SlackError>;
@@ -558,6 +564,7 @@ const make = Effect.gen(function* () {
   /** The user's pull request queue on GitHub; empty until `gh` answers. */
   let reviewRequests: ReadonlyArray<WorkGitHubPullRequest> = [];
   let authoredPullRequests: ReadonlyArray<WorkGitHubPullRequest> = [];
+  let mergedPullRequests: ReadonlyArray<WorkGitHubPullRequest> = [];
   let githubQueueAt = 0;
   let dismissed: ReadonlyArray<SlackDismissedThread> = [];
   let conversationOwners: ReadonlyArray<ConversationOwner> = [];
@@ -704,6 +711,7 @@ const make = Effect.gen(function* () {
       replyDrafts: connection ? replyDrafts : [],
       reviewRequests: connection ? reviewRequests : [],
       authoredPullRequests: connection ? authoredPullRequests : [],
+      mergedPullRequests: connection ? mergedPullRequests : [],
       includedChannelIds: connection ? [...includedChannelIds] : [],
       ...(connection && devinUser?.avatarUrl ? { devinAvatarUrl: devinUser.avatarUrl } : {}),
       devin: devin
@@ -753,6 +761,7 @@ const make = Effect.gen(function* () {
     devinSessions: [...devinSessions].map(([id, known]) => ({ id, ...known })),
     reviewRequests,
     authoredPullRequests,
+    mergedPullRequests,
   });
 
   const saveCache = Effect.suspend(() => {
@@ -851,6 +860,7 @@ const make = Effect.gen(function* () {
     }
     reviewRequests = cache.reviewRequests ?? [];
     authoredPullRequests = cache.authoredPullRequests ?? [];
+    mergedPullRequests = cache.mergedPullRequests ?? [];
     lastSyncedAt = cache.savedAt;
     cacheSavedAt = now;
   });
@@ -1130,6 +1140,7 @@ const make = Effect.gen(function* () {
         channelName: (id) => channels.get(id)?.name ?? followedChannels.get(id)?.name,
       }),
       fileCount: raw.files?.length ?? 0,
+      ...(raw.files?.length ? { images: slackImages(raw.files) } : {}),
       edited: raw.edited !== undefined,
       replyCount: raw.reply_count ?? 0,
       ...(raw.latest_reply ? { latestReplyTs: raw.latest_reply } : {}),
@@ -1629,7 +1640,14 @@ const make = Effect.gen(function* () {
     const result = yield* Effect.exit(
       github.execute({
         cwd: globalThis.process.cwd(),
-        args: ["api", "--hostname", "github.com", "graphql", "-f", `query=${GITHUB_QUEUE_QUERY}`],
+        args: [
+          "api",
+          "--hostname",
+          "github.com",
+          "graphql",
+          "-f",
+          `query=${githubQueueQuery(DateTime.formatIso(DateTime.makeUnsafe(githubQueueAt - 15 * 24 * 60 * 60_000)).slice(0, 10))}`,
+        ],
         rateLimitHost: "github.com",
       }),
     );
@@ -1642,10 +1660,12 @@ const make = Effect.gen(function* () {
     ) => encodePullRequests(left) === encodePullRequests(right);
     if (
       !same(queue.reviewRequested, reviewRequests) ||
-      !same(queue.authored, authoredPullRequests)
+      !same(queue.authored, authoredPullRequests) ||
+      !same(queue.merged, mergedPullRequests)
     ) {
       reviewRequests = queue.reviewRequested;
       authoredPullRequests = queue.authored;
+      mergedPullRequests = queue.merged;
       dirty = true;
     }
   });
@@ -1786,6 +1806,7 @@ const make = Effect.gen(function* () {
       pullRequestsScannedAt = 0;
       reviewRequests = [];
       authoredPullRequests = [];
+      mergedPullRequests = [];
       githubQueueAt = 0;
       if (restore) yield* restoreCache;
       syncFiber = yield* syncLoop.pipe(Effect.forkIn(layerScope));
@@ -2535,6 +2556,22 @@ const make = Effect.gen(function* () {
   }
   yield* publish;
 
+  const imageResponse = Effect.fn("slack.image_response")(function* (url: string) {
+    let current = connection;
+    if (!current) return yield* slackError("image", "Slack is not connected.");
+    if (
+      current.expiresAtMs !== undefined &&
+      current.expiresAtMs - 5 * 60_000 < (yield* Clock.currentTimeMillis)
+    ) {
+      current = yield* refreshAccessToken(current);
+    }
+    return yield* slackImageResponse(url, current.accessToken).pipe(
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.timeout("20 seconds"),
+      Effect.mapError(() => slackError("image", "The Slack image could not be loaded.")),
+    );
+  });
+
   return SlackService.of({
     state: SubscriptionRef.changes(stateRef),
     current: SubscriptionRef.get(stateRef),
@@ -2546,6 +2583,7 @@ const make = Effect.gen(function* () {
     resetInbox,
     getThread,
     getReplies,
+    imageResponse,
     setReaction,
     unfollow,
     setDismissed,

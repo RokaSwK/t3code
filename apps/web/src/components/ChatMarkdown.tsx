@@ -1582,6 +1582,7 @@ function ChatMarkdownImage(props: {
             decoding="async"
             draggable={false}
             className="invisible absolute inset-0 size-full"
+            loading={props.imageProps?.loading}
             {...imageEvents(src)}
           />
         ) : null}
@@ -1630,7 +1631,14 @@ export const ChatMarkdownAssetImage = memo(function ChatMarkdownAssetImage(props
   readonly environmentId: EnvironmentId;
   readonly resource: Extract<
     AssetResource,
-    { readonly _tag: "attachment" | "workspace-file" | "media-file" | "github-media" }
+    {
+      readonly _tag:
+        | "attachment"
+        | "workspace-file"
+        | "media-file"
+        | "github-media"
+        | "slack-image";
+    }
   >;
   readonly kind?: "image" | "video";
   readonly alt: string;

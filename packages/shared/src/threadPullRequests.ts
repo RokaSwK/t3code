@@ -322,3 +322,30 @@ export function threadPullRequestSearchTerms(thread: {
   const legacy = thread.linkedPullRequest;
   return legacy ? [`#${legacy.number}`, `${legacy.repository}#${legacy.number}`, legacy.url] : [];
 }
+
+/** A merge wait covers every visible stack member. Unknown status keeps the wait alive. */
+export function mergeWaitOutcome(
+  links: ReadonlyArray<ThreadPullRequestLink>,
+): "waiting" | "merged" | "wake" {
+  const visible = visibleThreadPullRequests(links);
+  if (visible.length === 0) return "wake";
+  if (
+    visible.some(
+      ({ snapshot }) =>
+        snapshot?.state === "closed" ||
+        (snapshot?.state === "open" &&
+          (snapshot.checksState === "failing" ||
+            snapshot.mergeability === "conflicting" ||
+            snapshot.reviewDecision === "changes-requested")),
+    )
+  )
+    return "wake";
+  return visible.every(({ snapshot }) => snapshot?.state === "merged") ? "merged" : "waiting";
+}
+
+export function canWaitForMerge(links: ReadonlyArray<ThreadPullRequestLink>): boolean {
+  return (
+    visibleThreadPullRequests(links).some(({ snapshot }) => snapshot?.state === "open") &&
+    mergeWaitOutcome(links) === "waiting"
+  );
+}

@@ -203,6 +203,13 @@ export function readEnvironmentSupportsSettlement(environmentId: EnvironmentId):
 
 /** Whether the environment's server understands thread.snooze/unsnooze.
     Same version-skew contract as settlement. */
+export function readEnvironmentSupportsMergeWait(environmentId: EnvironmentId): boolean {
+  return (
+    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
+      .threadMergeWait === true
+  );
+}
+
 export function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boolean {
   return (
     appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities

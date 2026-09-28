@@ -1,3 +1,9 @@
+import {
+  WorkCalendarReadInput,
+  WorkCalendarSetInput,
+  WorkCalendarResult,
+  WorkCalendarError,
+} from "./workCalendar.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -393,6 +399,8 @@ export const WS_METHODS = {
   slackDisconnect: "slack.disconnect",
   slackRefresh: "slack.refresh",
   slackResetInbox: "slack.resetInbox",
+  workCalendarRead: "work.calendarRead",
+  workCalendarSet: "work.calendarSet",
   slackGetThread: "slack.getThread",
   slackGetReplies: "slack.getReplies",
   slackSetReaction: "slack.setReaction",
@@ -1334,6 +1342,16 @@ const WsSubscribeDeviceStateRpc = Rpc.make(WS_METHODS.subscribeDeviceState, {
   stream: true,
 });
 
+const WsWorkCalendarReadRpc = Rpc.make(WS_METHODS.workCalendarRead, {
+  payload: WorkCalendarReadInput,
+  success: WorkCalendarResult,
+  error: Schema.Union([WorkCalendarError, EnvironmentAuthorizationError]),
+});
+const WsWorkCalendarSetRpc = Rpc.make(WS_METHODS.workCalendarSet, {
+  payload: WorkCalendarSetInput,
+  error: Schema.Union([WorkCalendarError, EnvironmentAuthorizationError]),
+});
+
 /** Starts Slack sign-in; the returned connection carries the URL to open. */
 const WsSlackConnectRpc = Rpc.make(WS_METHODS.slackConnect, {
   payload: SlackConnectInput,
@@ -1707,6 +1725,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsDeviceDetailRpc,
   WsDeviceActionRpc,
   WsSubscribeDeviceStateRpc,
+  WsWorkCalendarReadRpc,
+  WsWorkCalendarSetRpc,
   WsSlackConnectRpc,
   WsSlackCompleteConnectRpc,
   WsSlackCancelConnectRpc,

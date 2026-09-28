@@ -572,7 +572,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
         { type: "thread.pinned", payload: { pinnedAt: now, pinOrderKey: "m" } },
         {
           type: "thread.snoozed",
-          payload: { snoozedAt: now, snoozedUntil: "2026-01-02T00:00:00.000Z" },
+          payload: { snoozedAt: now, snoozedUntil: null, waitingForMergeAt: now },
         },
         { type: "thread.unsnoozed", payload: { reason: "user" } },
         { type: "thread.unpinned", payload: {} },
@@ -604,6 +604,10 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
           FROM projection_threads WHERE thread_id = 'thread-1'
         `;
         assert.deepEqual(rows, [{ activeOrderKey: "gm", updatedAt: orderUpdatedAt }]);
+        const waitRows = yield* sql<{
+          readonly waiting: string | null;
+        }>`SELECT waiting_for_merge_at AS waiting FROM projection_threads WHERE thread_id = 'thread-1'`;
+        assert.deepEqual(waitRows, [{ waiting: event.type === "thread.snoozed" ? now : null }]);
       }
 
       // Settled lifecycle through the DB pipeline: thread.settled writes the

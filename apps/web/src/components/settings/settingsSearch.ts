@@ -585,6 +585,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["connect sign in disconnect workspace inbox follow threads"],
   },
   {
+    id: "calendar",
+    title: "Google Calendar",
+    to: "/settings/work",
+    searchTerms: ["calendar ical secret address read-only meetings today standup recap"],
+  },
+  {
     id: "work-agent-folder",
     title: "Work agent",
     to: "/settings/work",

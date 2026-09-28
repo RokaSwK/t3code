@@ -8,6 +8,7 @@ import {
   ProjectFaviconPath,
 } from "./orchestration.ts";
 import { ToolActivityNativeAppReference } from "./providerRuntime.ts";
+import { SlackImageUrl } from "./slack.ts";
 
 const ASSET_PATH_MAX_LENGTH = 1024;
 
@@ -57,6 +58,7 @@ export const AssetResource = Schema.Union([
     cwd: TrimmedNonEmptyString.check(Schema.isMaxLength(ASSET_PATH_MAX_LENGTH)),
     url: TrimmedNonEmptyString.check(Schema.isMaxLength(2048)),
   }),
+  Schema.TaggedStruct("slack-image", { url: SlackImageUrl }),
 ]);
 export type AssetResource = typeof AssetResource.Type;
 

@@ -150,3 +150,15 @@ Choose **Snooze → Custom…** from a thread's menu to pick a date and time in 
 local time zone, or a duration in minutes, hours, or days. Durations start when
 you confirm; one day means 24 hours. On web and desktop, you can also snooze
 several selected threads together. Choose **Wake thread** to bring a thread back early.
+
+## Wait for someone else to merge
+
+Choose **Wait for merge** from the thread menu, command palette, or the thread's row in Work.
+On web and desktop, you can also hold ⌘⇧ (Ctrl+Shift on Windows/Linux) while clicking Settle.
+The thread moves to Snoozed without a timer, and Work shows **Waiting for merge**. Linked Slack
+conversations get your 🕒 reaction.
+
+All linked PRs must merge before the thread settles and 🕒 becomes ✅. Failing checks, requested
+changes, conflicts, or a PR closed without merging wake the thread instead. **Wake** or sending
+a new message cancels the wait and removes 🕒. This works while the client is closed; the server
+must stay running. Waiting requires an open linked PR without existing review or check problems.

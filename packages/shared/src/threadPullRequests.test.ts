@@ -6,6 +6,8 @@ import {
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
+  canWaitForMerge,
+  mergeWaitOutcome,
   legacyLinkedPullRequestOf,
   legacyThreadPullRequestKey,
   threadPullRequestSearchTerms,
@@ -461,4 +463,20 @@ it("searches the legacy projection when old environments decode to an empty link
   expect(
     threadPullRequestSearchTerms({ pullRequests: [link(34)], linkedPullRequest }),
   ).not.toContain("#12");
+});
+
+it("waits for every visible stack member, retains unknown status, and wakes on trouble", () => {
+  const merged = link(1, { snapshot: snapshot({ state: "merged" }) });
+  const open = link(2, { snapshot: snapshot({ reviewDecision: "approved" }) });
+  expect(canWaitForMerge([merged, open])).toBe(true);
+  expect(mergeWaitOutcome([merged, open])).toBe("waiting");
+  expect(mergeWaitOutcome([merged, link(2)])).toBe("waiting");
+  expect(mergeWaitOutcome([merged, { ...open, snapshot: snapshot({ state: "merged" }) }])).toBe(
+    "merged",
+  );
+  expect(mergeWaitOutcome([merged, { ...open, source: "stack-dismissed" }])).toBe("merged");
+  expect(mergeWaitOutcome([])).toBe("wake");
+  expect(canWaitForMerge([link(1, { snapshot: snapshot({ checksState: "failing" }) })])).toBe(
+    false,
+  );
 });

@@ -21,6 +21,7 @@ import {
   type SlackThread,
   type ThreadPullRequestSnapshot,
   type WorkGitHubPullRequest,
+  type WorkItemMark,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -32,9 +33,11 @@ export type WorkThread = { readonly environmentId: EnvironmentId } & Pick<
   | "updatedAt"
   | "archivedAt"
   | "settledAt"
+  | "waitingForMergeAt"
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "hasActionableProposedPlan"
+  | "hasChanges"
   | "latestTurn"
   | "backgroundLiveness"
   | "linkedSlackThreads"
@@ -175,6 +178,8 @@ function statusOf(
 ): Attention {
   const needs = agentNeeds(threads) ?? pullRequestNeeds(pullRequests);
   if (needs) return needs;
+  if (threads.some((thread) => thread.waitingForMergeAt != null))
+    return { status: "waiting", reason: "Waiting for merge" };
   if (agentWorking(threads)) return { status: "working", reason: "Agent working" };
   const waiting = pullRequestWaiting(pullRequests);
   if (waiting) return waiting;
@@ -217,7 +222,40 @@ function linkedPullRequestAttention(
   );
 }
 
-const pullRequestUrlKey = (url: string) => url.trim().toLowerCase().replace(/\/+$/, "");
+const pullRequestKey = (request: { url: string; repository: string; number: number }) =>
+  threadPullRequestKeyOf(legacyThreadPullRequestKey(request));
+
+/** Stable identities keep ignored/planned work attached when a GitHub row joins Slack. */
+export function workItemKeys(group: WorkGroup): string[] {
+  return [
+    ...group.slackLinks.map(slackKey),
+    ...group.threads.map((thread) => `thread:${thread.environmentId}:${thread.id}`),
+    ...group.pullRequests.map((request) => `pr:${pullRequestKey(request)}`),
+    ...(group.conversation?.pullRequests ?? []).map((request) => `pr:${pullRequestKey(request)}`),
+    ...(group.pullRequest ? [`pr:${pullRequestKey(group.pullRequest)}`] : []),
+  ];
+}
+
+export function workItemTitle(group: WorkGroup): string {
+  return group.conversation
+    ? slackMessageSummary(group.conversation.markdown) || "Work item"
+    : (group.pullRequest?.title ?? group.threads[0]?.title ?? "Work item");
+}
+
+export function workMatchesMarks(
+  keys: ReadonlyArray<string>,
+  marks: ReadonlyArray<WorkItemMark>,
+): boolean {
+  const marked = new Set(marks.flatMap((mark) => mark.keys));
+  return keys.some((key) => marked.has(key));
+}
+
+export function slackWorkItemKeys(thread: SlackThread): string[] {
+  return [
+    slackKey(thread.permalink),
+    ...(thread.pullRequests ?? []).map((request) => `pr:${pullRequestKey(request)}`),
+  ];
+}
 
 export function slackTsToMs(ts: string): number {
   return Math.floor(Number.parseFloat(ts) * 1000);
@@ -247,6 +285,23 @@ function conversationStatusOf(
   pullRequestDetails: ReadonlyMap<string, WorkGitHubPullRequest>,
   now: number,
 ): Attention {
+  if (threads.some((thread) => thread.waitingForMergeAt != null)) {
+    const needs = agentNeeds(threads) ?? pullRequestNeeds(pullRequests);
+    if (needs) return needs;
+    const sessions = conversation.devin?.sessions ?? [];
+    if (sessions.some((session) => session.state === "waiting"))
+      return { status: "needs", reason: "Devin is waiting for you" };
+    if (sessions.some((session) => session.state === "error"))
+      return { status: "needs", reason: "Devin stopped with an error" };
+    const trouble = linkedPullRequestAttention(
+      (conversation.pullRequests ?? []).flatMap((request) => {
+        const detail = pullRequestDetails.get(pullRequestKey(request));
+        return detail ? [detail] : [];
+      }),
+    );
+    if (trouble && trouble.reason !== "PR approved, ready to merge") return trouble;
+    return { status: "waiting", reason: "Waiting for merge" };
+  }
   const tick = slackThreadDoneReason({ ...conversation, pullRequests: [] });
   if (tick) return { status: "done", reason: tick };
   if (markedDone) return { status: "done", reason: "Marked done" };
@@ -264,8 +319,8 @@ function conversationStatusOf(
     linkedPullRequestAttention(
       (conversation.pullRequests ?? []).flatMap((request) => {
         const detail =
-          request.state === "open"
-            ? pullRequestDetails.get(pullRequestUrlKey(request.url))
+          request.state !== "merged" && request.state !== "closed"
+            ? pullRequestDetails.get(pullRequestKey(request))
             : undefined;
         return detail ? [detail] : [];
       }),
@@ -351,6 +406,15 @@ function slackKey(url: string): string {
   return `slack:${parseSlackThreadUrl(url)?.url ?? url}`;
 }
 
+/** Remove every Slack mention already represented by a work group, not just its leading one. */
+export function ungroupedWorkChannelThreads(
+  threads: ReadonlyArray<SlackThread>,
+  groups: ReadonlyArray<WorkGroup>,
+) {
+  const represented = new Set(groups.flatMap((group) => group.slackLinks.map(slackKey)));
+  return threads.filter((thread) => !represented.has(slackKey(thread.permalink)));
+}
+
 /**
  * Group threads and Slack conversations that refer to the same PR or Slack conversation, then
  * derive attention. A group with one of your conversations is led by it; the rest are T3 work.
@@ -359,6 +423,8 @@ export function buildWorkGroups(
   source: ReadonlyArray<WorkThread>,
   options: {
     readonly conversations?: ReadonlyArray<SlackThread>;
+    /** Channel threads join your work when they share a PR or T3 thread with it. */
+    readonly channelThreads?: ReadonlyArray<SlackThread>;
     readonly dismissed?: ReadonlyArray<SlackDismissedThread>;
     readonly owners?: ReadonlyArray<
       WorkOwner & { readonly channelId: string; readonly ts: string }
@@ -377,7 +443,25 @@ export function buildWorkGroups(
     readonly now: number;
   },
 ): WorkGroup[] {
-  const conversations = options.conversations ?? [];
+  const followed = options.conversations ?? [];
+  const conversationKeys = new Set(followed.map((thread) => `${thread.channelId}:${thread.ts}`));
+  const conversations = [
+    ...followed,
+    ...(options.channelThreads ?? []).filter((thread) => {
+      const key = `${thread.channelId}:${thread.ts}`;
+      if (conversationKeys.has(key)) return false;
+      conversationKeys.add(key);
+      return true;
+    }),
+  ];
+  const owners = options.github?.owners
+    ? new Set(options.github.owners.map((owner) => owner.toLowerCase()))
+    : null;
+  const githubKeys = new Set(
+    [...(options.github?.reviewRequests ?? []), ...(options.github?.authored ?? [])]
+      .filter((request) => !owners || owners.has(gitHubOwnerOf(request)))
+      .map(pullRequestKey),
+  );
   const now = options.now;
   const threads = source.filter(
     (thread) =>
@@ -415,15 +499,7 @@ export function buildWorkGroups(
   for (const [offset, conversation] of conversations.entries()) {
     join(threads.length + offset, [
       slackKey(conversation.permalink),
-      ...(conversation.pullRequests ?? []).map(
-        (request) =>
-          `pr:${threadPullRequestKeyOf({
-            host: "github.com",
-            repository: request.repository,
-            number: request.number,
-            url: request.url,
-          })}`,
-      ),
+      ...(conversation.pullRequests ?? []).map((request) => `pr:${pullRequestKey(request)}`),
     ]);
   }
   const buckets = new Map<number, number[]>();
@@ -441,7 +517,7 @@ export function buildWorkGroups(
   );
   const pullRequestDetails = new Map(
     (options.github?.authored ?? []).map(
-      (pullRequest) => [pullRequestUrlKey(pullRequest.url), pullRequest] as const,
+      (pullRequest) => [pullRequestKey(pullRequest), pullRequest] as const,
     ),
   );
   const waitOf = new Map(
@@ -450,18 +526,47 @@ export function buildWorkGroups(
   const ownerOf = new Map(
     (options.owners ?? []).map((entry) => [`${entry.channelId}:${entry.ts}`, entry] as const),
   );
-  const grouped = [...buckets.values()].map((members): WorkGroup => {
+  const relevantBuckets = [...buckets.values()].filter((members) =>
+    members.some(
+      (index) =>
+        index < threads.length + followed.length ||
+        (conversations[index - threads.length]?.pullRequests ?? []).some((request) =>
+          githubKeys.has(pullRequestKey(request)),
+        ),
+    ),
+  );
+  const grouped = relevantBuckets.map((members): WorkGroup => {
     const group = members.filter((index) => index < threads.length).map((index) => threads[index]!);
-    // Rarely two of your conversations share a PR; the most recent one leads.
-    const conversation =
-      members
-        .filter((index) => index >= threads.length)
-        .map((index) => conversations[index - threads.length]!)
-        .sort((left, right) => lastActivityMs(right, []) - lastActivityMs(left, []))[0] ?? null;
+    // Keep followed conversations in front of channel mentions; retain every linked PR.
+    const relatedConversations = members
+      .filter((index) => index >= threads.length)
+      .sort(
+        (left, right) =>
+          Number(right < threads.length + followed.length) -
+            Number(left < threads.length + followed.length) ||
+          lastActivityMs(conversations[right - threads.length]!, []) -
+            lastActivityMs(conversations[left - threads.length]!, []),
+      )
+      .map((index) => conversations[index - threads.length]!);
+    const primary = relatedConversations[0];
+    const conversationRequests = new Map<
+      string,
+      NonNullable<SlackThread["pullRequests"]>[number]
+    >();
+    for (const related of relatedConversations) {
+      for (const request of related.pullRequests ?? []) {
+        const key = pullRequestKey(request);
+        const previous = conversationRequests.get(key);
+        if (!previous || (!previous.state && request.state)) conversationRequests.set(key, request);
+      }
+    }
+    const conversation = primary
+      ? { ...primary, pullRequests: [...conversationRequests.values()] }
+      : null;
     const pullRequests = new Map<string, WorkPullRequest>();
     const slackLinks = new Set<string>();
-    if (conversation)
-      slackLinks.add(parseSlackThreadUrl(conversation.permalink)?.url ?? conversation.permalink);
+    for (const related of relatedConversations)
+      slackLinks.add(parseSlackThreadUrl(related.permalink)?.url ?? related.permalink);
     for (const thread of group) {
       for (const request of pullRequestsOf(thread)) {
         const previous = pullRequests.get(request.key);
@@ -523,15 +628,15 @@ export function buildWorkGroups(
   // Pull requests in your GitHub queue that no conversation or thread here is about.
   const covered = new Set(
     grouped.flatMap((group) => [
-      ...group.pullRequests.map((request) => pullRequestUrlKey(request.url)),
-      ...(group.conversation?.pullRequests ?? []).map((request) => pullRequestUrlKey(request.url)),
+      ...group.pullRequests.map(pullRequestKey),
+      ...(group.conversation?.pullRequests ?? []).map(pullRequestKey),
     ]),
   );
   const standalone = (
     pullRequest: WorkGitHubPullRequest,
     role: "review" | "authored",
   ): WorkGroup => ({
-    id: `github:${pullRequestUrlKey(pullRequest.url)}`,
+    id: `github:${pullRequestKey(pullRequest)}`,
     conversation: null,
     threads: [],
     pullRequests: [],
@@ -552,16 +657,13 @@ export function buildWorkGroups(
     pullRequestRole: role,
   });
   const listed = new Set(covered);
-  const owners = options.github?.owners
-    ? new Set(options.github.owners.map((owner) => owner.toLowerCase()))
-    : null;
   const queue: WorkGroup[] = [];
   for (const [role, list] of [
     ["review", options.github?.reviewRequests ?? []],
     ["authored", options.github?.authored ?? []],
   ] as const) {
     for (const pullRequest of list) {
-      const key = pullRequestUrlKey(pullRequest.url);
+      const key = pullRequestKey(pullRequest);
       if (listed.has(key)) continue;
       if (owners && !owners.has(gitHubOwnerOf(pullRequest))) continue;
       listed.add(key);

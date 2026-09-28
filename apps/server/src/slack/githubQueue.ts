@@ -5,20 +5,21 @@
  */
 import type { WorkGitHubPullRequest } from "@t3tools/contracts";
 
-/** The queue is read this often; it is two searches in one request. */
+/** The queue is read this often; it combines the active queue and recent merges in one request. */
 export const GITHUB_QUEUE_INTERVAL_MS = 5 * 60_000;
 const QUEUE_SIZE = 50;
 
 const PULL_REQUEST_FIELDS = `... on PullRequest {
-  url title number isDraft updatedAt reviewDecision mergeable
+  url title number isDraft updatedAt mergedAt reviewDecision mergeable
   repository { nameWithOwner }
   author { login avatarUrl }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 }`;
 
-export const GITHUB_QUEUE_QUERY = `query {
+export const githubQueueQuery = (since: string) => `query {
   reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${PULL_REQUEST_FIELDS} } }
   authored: search(query: "is:pr is:open archived:false author:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${PULL_REQUEST_FIELDS} } }
+  merged: search(query: "is:pr is:merged archived:false author:@me merged:>=${since} sort:updated-desc", type: ISSUE, first: 100) { nodes { ${PULL_REQUEST_FIELDS} } }
 }`;
 
 interface RawPullRequest {
@@ -27,6 +28,7 @@ interface RawPullRequest {
   readonly number?: unknown;
   readonly isDraft?: unknown;
   readonly updatedAt?: unknown;
+  readonly mergedAt?: unknown;
   readonly reviewDecision?: unknown;
   readonly mergeable?: unknown;
   readonly repository?: { readonly nameWithOwner?: unknown } | null;
@@ -52,6 +54,7 @@ function pullRequestOf(raw: RawPullRequest | null | undefined): WorkGitHubPullRe
     title: typeof raw.title === "string" ? raw.title : `#${raw.number}`,
     isDraft: raw.isDraft === true,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : "",
+    ...(typeof raw.mergedAt === "string" ? { mergedAt: raw.mergedAt } : {}),
     ...(typeof author?.login === "string" ? { author: author.login } : {}),
     ...(typeof author?.avatarUrl === "string" ? { authorAvatarUrl: author.avatarUrl } : {}),
     ...(review === "APPROVED"
@@ -72,16 +75,18 @@ function pullRequestOf(raw: RawPullRequest | null | undefined): WorkGitHubPullRe
   };
 }
 
-/** The two searches' pull requests, or null when GitHub did not answer the query. */
+/** The searches' pull requests, or null when GitHub did not answer the query. */
 export function parseGitHubQueue(response: unknown): {
   readonly reviewRequested: ReadonlyArray<WorkGitHubPullRequest>;
   readonly authored: ReadonlyArray<WorkGitHubPullRequest>;
+  readonly merged: ReadonlyArray<WorkGitHubPullRequest>;
 } | null {
   const data = (
     response as {
       data?: {
         reviewRequested?: { nodes?: ReadonlyArray<RawPullRequest | null> };
         authored?: { nodes?: ReadonlyArray<RawPullRequest | null> };
+        merged?: { nodes?: ReadonlyArray<RawPullRequest | null> };
       };
     } | null
   )?.data;
@@ -94,5 +99,6 @@ export function parseGitHubQueue(response: unknown): {
   return {
     reviewRequested: list(data.reviewRequested.nodes),
     authored: list(data.authored.nodes),
+    merged: list(data.merged?.nodes).filter((request) => request.mergedAt !== undefined),
   };
 }

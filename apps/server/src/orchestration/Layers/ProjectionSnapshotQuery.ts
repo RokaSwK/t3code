@@ -136,6 +136,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     owner: Schema.NullOr(Schema.fromJsonString(ThreadOwner)),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    hasChanges: Schema.Number,
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -591,6 +592,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           unsettled_at AS "unsettledAt",
           snoozed_until AS "snoozedUntil",
           snoozed_at AS "snoozedAt",
+          waiting_for_merge_at AS "waitingForMergeAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
@@ -601,6 +603,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = projection_threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -641,6 +644,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           unsettled_at AS "unsettledAt",
           snoozed_until AS "snoozedUntil",
           snoozed_at AS "snoozedAt",
+          waiting_for_merge_at AS "waitingForMergeAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
@@ -651,6 +655,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads threads
         WHERE deleted_at IS NULL
@@ -718,6 +723,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           unsettled_at AS "unsettledAt",
           snoozed_until AS "snoozedUntil",
           snoozed_at AS "snoozedAt",
+          waiting_for_merge_at AS "waitingForMergeAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
@@ -728,6 +734,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = projection_threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -1324,6 +1331,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           unsettled_at AS "unsettledAt",
           snoozed_until AS "snoozedUntil",
           snoozed_at AS "snoozedAt",
+          waiting_for_merge_at AS "waitingForMergeAt",
           pinned_at AS "pinnedAt",
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
@@ -1334,6 +1342,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = projection_threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -2402,6 +2411,7 @@ pending_approval_requests AS (
                 unsettledAt: row.unsettledAt,
                 snoozedUntil: row.snoozedUntil,
                 snoozedAt: row.snoozedAt,
+                waitingForMergeAt: row.waitingForMergeAt ?? null,
                 pinnedAt: row.pinnedAt,
                 pinOrderKey: row.pinOrderKey ?? null,
                 activeOrderKey: row.activeOrderKey ?? null,
@@ -2650,6 +2660,7 @@ pending_approval_requests AS (
                   unsettledAt: row.unsettledAt,
                   snoozedUntil: row.snoozedUntil,
                   snoozedAt: row.snoozedAt,
+                  waitingForMergeAt: row.waitingForMergeAt ?? null,
                   pinnedAt: row.pinnedAt,
                   pinOrderKey: row.pinOrderKey ?? null,
                   activeOrderKey: row.activeOrderKey ?? null,
@@ -2813,6 +2824,7 @@ pending_approval_requests AS (
                         unsettledAt: row.unsettledAt,
                         snoozedUntil: row.snoozedUntil,
                         snoozedAt: row.snoozedAt,
+                        waitingForMergeAt: row.waitingForMergeAt ?? null,
                         pinnedAt: row.pinnedAt,
                         pinOrderKey: row.pinOrderKey ?? null,
                         activeOrderKey: row.activeOrderKey ?? null,
@@ -2824,6 +2836,7 @@ pending_approval_requests AS (
                         hasPendingApprovals: row.pendingApprovalCount > 0,
                         hasPendingUserInput: row.pendingUserInputCount > 0,
                         hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                        hasChanges: row.hasChanges > 0,
                         backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
                           row.threadId,
                         ),
@@ -3001,6 +3014,7 @@ pending_approval_requests AS (
                   unsettledAt: row.unsettledAt,
                   snoozedUntil: row.snoozedUntil,
                   snoozedAt: row.snoozedAt,
+                  waitingForMergeAt: row.waitingForMergeAt ?? null,
                   pinnedAt: row.pinnedAt,
                   pinOrderKey: row.pinOrderKey ?? null,
                   activeOrderKey: row.activeOrderKey ?? null,
@@ -3012,6 +3026,7 @@ pending_approval_requests AS (
                   hasPendingApprovals: row.pendingApprovalCount > 0,
                   hasPendingUserInput: row.pendingUserInputCount > 0,
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                  hasChanges: row.hasChanges > 0,
                   backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
                     row.threadId,
                   ),
@@ -3352,6 +3367,7 @@ pending_approval_requests AS (
         unsettledAt: threadRow.value.unsettledAt,
         snoozedUntil: threadRow.value.snoozedUntil,
         snoozedAt: threadRow.value.snoozedAt,
+        waitingForMergeAt: threadRow.value.waitingForMergeAt ?? null,
         pinnedAt: threadRow.value.pinnedAt,
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         activeOrderKey: threadRow.value.activeOrderKey ?? null,
@@ -3363,6 +3379,7 @@ pending_approval_requests AS (
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        hasChanges: threadRow.value.hasChanges > 0,
         backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
           threadRow.value.threadId,
         ),
@@ -3656,6 +3673,7 @@ pending_approval_requests AS (
         unsettledAt: threadRow.value.unsettledAt,
         snoozedUntil: threadRow.value.snoozedUntil,
         snoozedAt: threadRow.value.snoozedAt,
+        waitingForMergeAt: threadRow.value.waitingForMergeAt ?? null,
         pinnedAt: threadRow.value.pinnedAt,
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         activeOrderKey: threadRow.value.activeOrderKey ?? null,

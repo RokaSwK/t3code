@@ -89,6 +89,32 @@ const slackState = (overrides: Partial<SlackState>): SlackState => ({
 });
 
 describe("buildWorkOverview", () => {
+  it("lists channel-linked GitHub work once, outside the new-thread feed", () => {
+    const pullRequest = {
+      url: "https://github.com/acme/app/pull/42",
+      repository: "acme/app",
+      number: 42,
+      title: "Fix refunds",
+      isDraft: false,
+      updatedAt: "2026-09-27T11:00:00.000Z",
+    };
+    const mention = conversation("C1", { pullRequests: [pullRequest] });
+    const overview = buildWorkOverview({
+      threads: [],
+      projects: [],
+      slack: slackState({ threads: [mention], reviewRequests: [pullRequest] }),
+      workProjectRootIds: undefined,
+      statuses: ["needs", "working", "waiting", "watching", "done"],
+      includeNewThreads: true,
+      limit: 40,
+      now: NOW,
+    });
+    expect(overview.items).toHaveLength(1);
+    expect(overview.items[0]?.id).toBe(`slack:C1:${mention.ts}`);
+    expect(overview.items[0]?.pullRequests).toHaveLength(1);
+    expect(overview.newThreads).toEqual([]);
+  });
+
   it("groups like the Work page: handed-off conversations are watched, waits hold", () => {
     const needs = conversation("C1");
     const handedOff = conversation("C2");
@@ -134,4 +160,59 @@ describe("buildWorkOverview", () => {
     expect(overview.counts).toEqual({ needs: 1, working: 1, waiting: 1, watching: 1, done: 0 });
     expect(overview.projects.map((entry) => entry.projectId)).toEqual(["tuyo", "other"]);
   });
+});
+
+it("removes ignored work and its Slack mention from the agent overview", () => {
+  const request = {
+    url: "https://github.com/acme/app/pull/42",
+    repository: "acme/app",
+    number: 42,
+    title: "Fix refunds",
+    isDraft: false,
+    updatedAt: "2026-09-27T11:00:00.000Z",
+  };
+  const overview = buildWorkOverview({
+    threads: [],
+    projects: [],
+    slack: slackState({
+      threads: [conversation("C1", { pullRequests: [request] })],
+      reviewRequests: [request],
+    }),
+    workProjectRootIds: undefined,
+    workIgnoredItems: [{ keys: ["pr:github.com/acme/app#42"], title: "Ignored", at: NOW }],
+    statuses: ["needs", "working", "waiting", "watching", "done"],
+    includeNewThreads: true,
+    limit: 40,
+    now: NOW,
+  });
+  expect(overview.items).toEqual([]);
+  expect(overview.newThreads).toEqual([]);
+});
+
+it("keeps ignored work hidden when a second PR mention later joins its Slack conversation", () => {
+  const first = {
+    url: "https://github.com/acme/app/pull/42",
+    repository: "acme/app",
+    number: 42,
+    title: "Fix refunds",
+    isDraft: false,
+    updatedAt: "2026-09-27T11:00:00.000Z",
+  };
+  const second = { ...first, number: 43, url: "https://github.com/acme/app/pull/43" };
+  const overview = buildWorkOverview({
+    threads: [],
+    projects: [],
+    slack: slackState({
+      conversations: [conversation("C1", { pullRequests: [first, second] })],
+      threads: [conversation("C2", { pullRequests: [second] })],
+    }),
+    workProjectRootIds: undefined,
+    workIgnoredItems: [{ keys: ["pr:github.com/acme/app#42"], title: "Ignored", at: NOW }],
+    statuses: ["needs", "working", "waiting", "watching", "done"],
+    includeNewThreads: true,
+    limit: 40,
+    now: NOW,
+  });
+  expect(overview.items).toEqual([]);
+  expect(overview.newThreads).toEqual([]);
 });

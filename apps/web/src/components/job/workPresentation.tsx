@@ -1,11 +1,12 @@
 import type { DevinSessionState, SlackChannelKind } from "@t3tools/contracts";
-import { BotIcon, HashIcon, LockIcon, MessageCircleIcon, UsersIcon } from "lucide-react";
+import { BotIcon, HashIcon, LockIcon, MessageCircleIcon, SlackIcon, UsersIcon } from "lucide-react";
 import { memo, type ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { T3Wordmark } from "../T3Wordmark";
+import { GitHubIcon } from "../Icons";
 import { Separator } from "../ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { WorkStatus } from "./workGroups";
@@ -161,6 +162,7 @@ export const WorkRow = memo(function WorkRow({
   id,
   selected,
   glyph,
+  source,
   title,
   signals,
   meta,
@@ -170,6 +172,7 @@ export const WorkRow = memo(function WorkRow({
   readonly id: string;
   readonly selected: boolean;
   readonly glyph: ReactNode;
+  readonly source: "slack" | "github" | "t3";
   readonly title: string;
   readonly signals?: ReactNode;
   readonly meta: ReactNode;
@@ -188,7 +191,16 @@ export const WorkRow = memo(function WorkRow({
         selected ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
-      <span className="mt-0.5 flex">{glyph}</span>
+      <span className="mt-0.5 flex shrink-0 items-center gap-1 text-muted-foreground">
+        {glyph}
+        {source === "slack" ? (
+          <SlackIcon role="img" aria-label="From Slack" className="size-3.5" />
+        ) : source === "github" ? (
+          <GitHubIcon role="img" aria-label="From GitHub" className="size-3.5" />
+        ) : (
+          <T3Logo />
+        )}
+      </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-sm">{title}</span>

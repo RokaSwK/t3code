@@ -1084,7 +1084,22 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+export const WorkItemMark = Schema.Struct({
+  keys: Schema.Array(TrimmedNonEmptyString),
+  title: TrimmedNonEmptyString,
+  at: Schema.Number,
+});
+export type WorkItemMark = typeof WorkItemMark.Type;
+
+export const WorkDayPlan = Schema.Struct({
+  date: Schema.String,
+  items: Schema.Array(WorkItemMark),
+});
+
 export const ServerSettings = Schema.Struct({
+  workIgnoredItems: Schema.optionalKey(Schema.Array(WorkItemMark)),
+  workDayPlan: Schema.optionalKey(WorkDayPlan),
+  workDemoHighlights: Schema.optionalKey(Schema.Array(WorkItemMark)),
   /** Roots included in Work; absence allows a client to suggest an initial scope. */
   workProjectRootIds: Schema.optionalKey(Schema.Array(ProjectId)),
   /** Keep adding new Codex and Claude app sessions as threads; absent means on. */
@@ -1457,6 +1472,9 @@ const OpenCodeSettingsPatch = Schema.Struct({
 });
 
 export const ServerSettingsPatch = Schema.Struct({
+  workIgnoredItems: Schema.optionalKey(Schema.Array(WorkItemMark)),
+  workDayPlan: Schema.optionalKey(WorkDayPlan),
+  workDemoHighlights: Schema.optionalKey(Schema.Array(WorkItemMark)),
   workProjectRootIds: Schema.optionalKey(Schema.Array(ProjectId)),
   agentSessionAutoImport: Schema.optionalKey(Schema.Boolean),
   workAgentProjectIds: Schema.optionalKey(Schema.Array(ProjectId)),

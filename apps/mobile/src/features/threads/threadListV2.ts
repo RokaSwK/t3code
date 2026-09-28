@@ -409,9 +409,11 @@ export function buildThreadListV2ListItems(input: {
 }): ThreadListV2ListItem[] {
   const threadItems = input.items.map((item): ThreadListV2ListItem => {
     const snoozeWakeLabelText =
-      item.snoozed && item.thread.snoozedUntil != null && input.snoozeLabelNow !== undefined
-        ? snoozeWakeLabel(item.thread.snoozedUntil, { now: input.snoozeLabelNow })
-        : undefined;
+      item.snoozed && item.thread.waitingForMergeAt != null
+        ? "Merge"
+        : item.snoozed && item.thread.snoozedUntil != null && input.snoozeLabelNow !== undefined
+          ? snoozeWakeLabel(item.thread.snoozedUntil, { now: input.snoozeLabelNow })
+          : undefined;
     // The minute clock belongs on the item, not the list's extraData, so the
     // recycler's equality can confine the per-minute re-render to rows whose
     // snooze menu actually shows preset times. The swipe-revealed snooze menu

@@ -79,6 +79,7 @@ function threadDetailToShell(
     pinOrderKey: thread.pinOrderKey,
     snoozedUntil: thread.snoozedUntil ?? null,
     snoozedAt: thread.snoozedAt ?? null,
+    waitingForMergeAt: thread.waitingForMergeAt ?? null,
     session: thread.session,
     latestUserMessageAt: latestUserMessageAt(thread),
     hasPendingApprovals: false,

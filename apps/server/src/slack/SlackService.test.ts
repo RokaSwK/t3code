@@ -19,6 +19,14 @@ interface SlackCall {
   readonly token: string | undefined;
 }
 
+const imageFile = {
+  id: "F1",
+  title: "Screenshot",
+  mimetype: "image/png",
+  url_private: "https://files.slack.com/files-pri/T1-F1/screenshot.png",
+};
+const expectedImage = { id: "F1", name: "Screenshot", url: imageFile.url_private };
+
 // @effect-diagnostics-next-line globalDate:off - the service reads Slack's recent window live.
 const nowTs = (offsetSeconds: number) => (Date.now() / 1000 + offsetSeconds).toFixed(6);
 
@@ -84,6 +92,7 @@ function fakeSlack(
           thread_ts: root,
           user: "U2",
           text: "*ship* it <@U1> :blob: <https://github.com/acme/app/pull/7|acme/app#7>",
+          files: [imageFile],
           reply_count: 1,
           latest_reply: reply,
           reactions: [{ name: "blob", count: 1, users: ["U2"] }],
@@ -95,7 +104,7 @@ function fakeSlack(
       ok: true,
       messages: [
         { ts: root, user: "U2", text: "root", reply_count: 1, latest_reply: reply },
-        { ts: reply, thread_ts: root, user: "U1", text: "reply" },
+        { ts: reply, thread_ts: root, user: "U1", text: "reply", files: [imageFile] },
       ],
     },
     "users.info": { ok: true },
@@ -459,6 +468,7 @@ describe("SlackService", () => {
       assert.strictEqual(authorizeUrl.searchParams.get("code_challenge_method"), "S256");
       assert.strictEqual(authorizeUrl.searchParams.get("redirect_uri"), SLACK_OAUTH_REDIRECT_URI);
       assert.include(authorizeUrl.searchParams.get("user_scope") ?? "", "reactions:write");
+      assert.include(authorizeUrl.searchParams.get("user_scope") ?? "", "files:read");
 
       // A redirect for another sign-in attempt is refused.
       const forged = yield* Effect.flip(
@@ -504,6 +514,7 @@ describe("SlackService", () => {
         "**ship** it **@Ada** :blob: [acme/app#7](https://github.com/acme/app/pull/7)",
       );
       assert.strictEqual(thread?.replyCount, 1);
+      assert.deepStrictEqual(thread?.images, [expectedImage]);
       assert.deepStrictEqual(thread?.reactions, [
         { name: "blob", count: 1, reacted: false, imageUrl: "https://emoji.test/p.gif" },
       ]);
@@ -533,6 +544,7 @@ describe("SlackService", () => {
       );
       assert.include(missing.message, "not accessible");
       const replies = yield* slack.getReplies({ channelId: "C1", ts: thread!.ts });
+      assert.deepStrictEqual(replies[0]?.images, [expectedImage]);
       assert.deepStrictEqual(
         replies.map((message) => [message.authorName, message.markdown]),
         [["Ada", "reply"]],

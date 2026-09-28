@@ -1,8 +1,9 @@
+import { WorkRecapDialog } from "./WorkRecapPanel";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { EllipsisIcon, MessageCircleIcon, PencilLineIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { EllipsisIcon, MessageCircleIcon, PencilLineIcon, SearchIcon, XIcon } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
@@ -27,6 +28,7 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { RefreshIcon } from "../ui/refresh-icon";
 import { SidebarInset } from "../ui/sidebar";
@@ -40,7 +42,12 @@ import { ChannelPickerDialog } from "./ChannelPickerDialog";
 import { slackThreadDoneReason } from "./slackInbox";
 import { WorkAgentButton } from "./WorkAgentButton";
 import { WorkDetail, type WorkSelection } from "./WorkDetail";
-import { buildWorkGroups, slackTsToMs, type WorkGroup } from "./workGroups";
+import {
+  buildWorkGroups,
+  slackTsToMs,
+  ungroupedWorkChannelThreads,
+  type WorkGroup,
+} from "./workGroups";
 import {
   DEVIN_STATE_PRESENTATION,
   DevinLogo,
@@ -55,6 +62,9 @@ import {
 } from "./workPresentation";
 import { includedWorkProjects, workRootsForEnvironment } from "./workScope";
 import { WorkScopeDialog } from "./WorkScopeDialog";
+import { WorkIgnoredDialog } from "./WorkItemActions";
+import { workItemKeys, workMatchesMarks, slackWorkItemKeys } from "./workGroups";
+import { buildWorkSearchIndex, workSearchMatches } from "./workSearch";
 
 /** New threads are for skimming; the rest of the feed is one click away. */
 const NEW_PREVIEW = 8;
@@ -161,11 +171,13 @@ function JobHeaderMenu({
   slackConnected,
   onManageChannels,
   onChooseFolders,
+  onShowIgnored,
 }: {
   readonly environmentId: EnvironmentId | null;
   readonly slackConnected: boolean;
   readonly onManageChannels: () => void;
   readonly onChooseFolders: () => void;
+  readonly onShowIgnored: () => void;
 }) {
   const navigate = useNavigate();
   const resetInbox = useAtomCommand(slackEnvironment.resetInbox, { reportFailure: false });
@@ -179,6 +191,7 @@ function JobHeaderMenu({
         </MenuTrigger>
         <MenuPopup align="end">
           <MenuItem onClick={onChooseFolders}>Choose folders…</MenuItem>
+          <MenuItem onClick={onShowIgnored}>Ignored work…</MenuItem>
           {slackConnected ? (
             <>
               <MenuItem onClick={onManageChannels}>Choose channels…</MenuItem>
@@ -237,6 +250,7 @@ function useWorkList(slackState: SlackState | null) {
     connection?.status === "connected" ||
     (connection?.status === "authorizing" && connection.connectedAs !== undefined);
   const conversations = slackConnected ? slackState!.conversations : undefined;
+  const channelThreads = slackConnected ? slackState!.threads : undefined;
   const dismissed = slackState?.dismissed;
   const owners = slackState?.conversationOwners;
   const waits = slackState?.conversationWaits;
@@ -247,10 +261,14 @@ function useWorkList(slackState: SlackState | null) {
   const gitHubOwners = primaryEnvironmentId
     ? configs.get(primaryEnvironmentId)?.settings.workGitHubOwners
     : undefined;
+  const ignoredItems = primaryEnvironmentId
+    ? configs.get(primaryEnvironmentId)?.settings.workIgnoredItems
+    : undefined;
   const groups = useMemo(
     () =>
       buildWorkGroups(shells, {
         ...(conversations ? { conversations } : {}),
+        ...(channelThreads ? { channelThreads } : {}),
         ...(dismissed ? { dismissed } : {}),
         ...(owners ? { owners } : {}),
         ...(waits ? { waits } : {}),
@@ -265,7 +283,17 @@ function useWorkList(slackState: SlackState | null) {
           : {}),
         now: Date.now(),
       }),
-    [shells, conversations, dismissed, owners, waits, reviewRequests, authored, gitHubOwners],
+    [
+      shells,
+      conversations,
+      channelThreads,
+      dismissed,
+      owners,
+      waits,
+      reviewRequests,
+      authored,
+      gitHubOwners,
+    ],
   );
   const includedProjects = useMemo(
     () => includedWorkProjects(projects, configs),
@@ -275,12 +303,14 @@ function useWorkList(slackState: SlackState | null) {
     const byRecent = (left: WorkGroup, right: WorkGroup) =>
       right.updatedAt.localeCompare(left.updatedAt);
     const mine = groups
+      .filter((group) => !workMatchesMarks(workItemKeys(group), ignoredItems ?? []))
       .filter((group) => group.conversation !== null || group.pullRequest !== null)
       .toSorted(byRecent);
     const included = new Set(
       includedProjects.map((project) => `${project.environmentId}:${project.id}`),
     );
     const other = groups
+      .filter((group) => !workMatchesMarks(workItemKeys(group), ignoredItems ?? []))
       .filter(
         (group) =>
           group.conversation === null &&
@@ -289,16 +319,14 @@ function useWorkList(slackState: SlackState | null) {
           ),
       )
       .toSorted(byRecent);
-    const mineKeys = new Set(mine.map((group) => group.id));
     const dismissedKeys = new Set(
       (slackState?.dismissed ?? []).map((thread) => `${thread.channelId}:${thread.ts}`),
     );
     const fresh: SlackThread[] = [];
     const cleared: SlackThread[] = [];
-    for (const thread of slackConnected ? slackState!.threads : []) {
+    for (const thread of ungroupedWorkChannelThreads(channelThreads ?? [], groups)) {
+      if (workMatchesMarks(slackWorkItemKeys(thread), ignoredItems ?? [])) continue;
       const key = `${thread.channelId}:${thread.ts}`;
-      // A thread that became yours is listed with your work, not twice.
-      if (mineKeys.has(`slack:${key}`)) continue;
       if (dismissedKeys.has(key) || slackThreadDoneReason(thread) !== null) cleared.push(thread);
       else fresh.push(thread);
     }
@@ -316,8 +344,16 @@ function useWorkList(slackState: SlackState | null) {
       cleared,
       other,
       all: [...mine, ...other],
+      recapGroups: groups.filter(
+        (group) =>
+          group.conversation !== null ||
+          group.pullRequest !== null ||
+          group.threads.some((thread) =>
+            included.has(`${thread.environmentId}:${thread.projectId}`),
+          ),
+      ),
     };
-  }, [groups, includedProjects, slackConnected, slackState]);
+  }, [groups, includedProjects, slackConnected, slackState, channelThreads, ignoredItems]);
 }
 
 type WorkList = ReturnType<typeof useWorkList>;
@@ -361,6 +397,7 @@ function ConversationRows({
         id={`c:${group.id}`}
         selected={selectedId === `c:${group.id}`}
         glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        source="slack"
         title={slackMessageSummary(group.conversation.markdown)}
         signals={
           <ConversationSignals
@@ -379,6 +416,7 @@ function ConversationRows({
         id={`c:${group.id}`}
         selected={selectedId === `c:${group.id}`}
         glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        source="github"
         title={group.pullRequest.title}
         signals={
           <PullRequestStateGlyph
@@ -429,6 +467,7 @@ function NewThreadRows({
         id={id}
         selected={selectedId === id}
         glyph={<WorkStatusDot status="new" />}
+        source="slack"
         title={slackMessageSummary(thread.markdown)}
         signals={
           thread.replyCount > 0 ? (
@@ -470,6 +509,7 @@ function OtherWorkRows({
         id={`w:${group.id}`}
         selected={selectedId === `w:${group.id}`}
         glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        source="t3"
         title={primary.title}
         signals={
           pullRequest ? (
@@ -515,7 +555,32 @@ export function JobPage() {
   const projects = useProjects();
   const configs = useServerConfigs();
   const bootstrapped = useAllEnvironmentShellsBootstrapped();
-  const list = useWorkList(state);
+  const fullList = useWorkList(state);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const searching = search.trim().length > 0;
+  const searchIndex = useMemo(
+    () => buildWorkSearchIndex(fullList.all, [...fullList.fresh, ...fullList.cleared], projects),
+    [fullList, projects],
+  );
+  const list = useMemo(() => {
+    if (!searching) return fullList;
+    const matchesGroup = (group: WorkGroup) =>
+      workSearchMatches(searchIndex.groups.get(group.id), search);
+    const matchesThread = (thread: SlackThread) =>
+      workSearchMatches(searchIndex.threads.get(`${thread.channelId}:${thread.ts}`), search);
+    return {
+      ...fullList,
+      needs: fullList.needs.filter(matchesGroup),
+      working: fullList.working.filter(matchesGroup),
+      waiting: fullList.waiting.filter(matchesGroup),
+      watching: fullList.watching.filter(matchesGroup),
+      done: fullList.done.filter(matchesGroup),
+      other: fullList.other.filter(matchesGroup),
+      fresh: fullList.fresh.filter(matchesThread),
+      cleared: fullList.cleared.filter(matchesThread),
+    };
+  }, [fullList, searchIndex, search, searching]);
   const refresh = useAtomCommand(slackEnvironment.refresh);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
@@ -526,7 +591,9 @@ export function JobPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [managingChannels, setManagingChannels] = useState(false);
   const [choosingFolders, setChoosingFolders] = useState(false);
-  const selection = selectionFor(list, selectedId);
+  const [showRecap, setShowRecap] = useState(false);
+  const [showIgnored, setShowIgnored] = useState(false);
+  const selection = selectionFor(fullList, selectedId);
   const draftKeys = useMemo(
     () => new Set((state?.replyDrafts ?? []).map((draft) => `${draft.channelId}:${draft.ts}`)),
     [state?.replyDrafts],
@@ -541,8 +608,15 @@ export function JobPage() {
     return roots.find((project) => project.environmentId === environmentId) ?? roots[0] ?? null;
   }, [projects, configs, environmentId]);
   const active = list.needs.length + list.working.length + list.waiting.length;
+  const resultCount =
+    active +
+    list.watching.length +
+    list.done.length +
+    list.other.length +
+    list.fresh.length +
+    list.cleared.length;
   // Without Slack, T3 work is all there is.
-  const otherOpen = showOther || !list.slackConnected;
+  const otherOpen = searching || showOther || !list.slackConnected;
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -561,6 +635,9 @@ export function JobPage() {
                   {state.sync.error ? ` · ${state.sync.error}` : ""}
                 </span>
               ) : null}
+              <Button size="sm" variant="ghost" onClick={() => setShowRecap(true)}>
+                Recap
+              </Button>
               <WorkAgentButton environmentId={environmentId} fallbackRoot={agentRoot} />
               {list.slackConnected && environmentId ? (
                 <Tooltip>
@@ -591,11 +668,56 @@ export function JobPage() {
                 slackConnected={list.slackConnected}
                 onManageChannels={() => setManagingChannels(true)}
                 onChooseFolders={() => setChoosingFolders(true)}
+                onShowIgnored={() => setShowIgnored(true)}
               />
             </div>
           </WorkspacePageHeader>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <WorkspacePageContainer width="readable" className="gap-5 px-2 sm:px-3">
+              <div className="mx-3">
+                <InputGroup>
+                  <InputGroupAddon>
+                    <SearchIcon aria-hidden="true" />
+                  </InputGroupAddon>
+                  <InputGroupInput
+                    ref={searchRef}
+                    type="search"
+                    aria-label="Search Tuyo Work"
+                    placeholder="Search work…"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape" && search && !event.nativeEvent.isComposing) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setSearch("");
+                      }
+                    }}
+                  />
+                  {search ? (
+                    <InputGroupAddon align="inline-end">
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="Clear search"
+                        onClick={() => {
+                          setSearch("");
+                          searchRef.current?.focus();
+                        }}
+                      >
+                        <XIcon />
+                      </Button>
+                    </InputGroupAddon>
+                  ) : null}
+                </InputGroup>
+              </div>
+              {searching ? (
+                <p role="status" className="px-3 text-sm text-muted-foreground">
+                  {resultCount === 0
+                    ? "No matching work. Try another search."
+                    : `${resultCount} ${resultCount === 1 ? "result" : "results"}`}
+                </p>
+              ) : null}
               {!list.slackConnected ? (
                 state === null ? null : (
                   <div className="mx-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border px-3 py-2.5">
@@ -607,7 +729,7 @@ export function JobPage() {
                     </Button>
                   </div>
                 )
-              ) : active === 0 ? (
+              ) : !searching && active === 0 ? (
                 <p className="px-3 text-sm text-muted-foreground">
                   Nothing is open right now. New threads from your channels are below.
                 </p>
@@ -632,13 +754,14 @@ export function JobPage() {
                   </section>
                 ) : null,
               )}
-              {list.slackConnected ? (
+              {list.slackConnected &&
+              (!searching || list.fresh.length + list.cleared.length > 0) ? (
                 <section className="flex flex-col">
                   <WorkGroupHeader
                     label="New in your channels"
                     count={list.fresh.length}
                     action={
-                      list.cleared.length > 0 ? (
+                      !searching && list.cleared.length > 0 ? (
                         <Button
                           size="xs"
                           variant="ghost"
@@ -650,7 +773,8 @@ export function JobPage() {
                       ) : undefined
                     }
                   />
-                  {state?.includedChannelIds.length === 0 ? (
+                  {searching && list.fresh.length === 0 ? null : state?.includedChannelIds
+                      .length === 0 ? (
                     <div className="flex items-center gap-2 px-3 py-1 text-xs text-muted-foreground">
                       Pick the channels to watch for new threads.
                       <Button size="xs" variant="outline" onClick={() => setManagingChannels(true)}>
@@ -664,11 +788,13 @@ export function JobPage() {
                   ) : (
                     <>
                       <NewThreadRows
-                        threads={showAllNew ? list.fresh : list.fresh.slice(0, NEW_PREVIEW)}
+                        threads={
+                          searching || showAllNew ? list.fresh : list.fresh.slice(0, NEW_PREVIEW)
+                        }
                         selectedId={selectedId}
                         onSelect={setSelectedId}
                       />
-                      {list.fresh.length > NEW_PREVIEW ? (
+                      {!searching && list.fresh.length > NEW_PREVIEW ? (
                         <Button
                           size="xs"
                           variant="ghost"
@@ -680,7 +806,10 @@ export function JobPage() {
                       ) : null}
                     </>
                   )}
-                  {showCleared ? (
+                  {searching && list.cleared.length > 0 ? (
+                    <WorkGroupHeader label="Cleared" count={list.cleared.length} />
+                  ) : null}
+                  {searching || showCleared ? (
                     <NewThreadRows
                       threads={list.cleared}
                       selectedId={selectedId}
@@ -695,13 +824,15 @@ export function JobPage() {
                     label="Watching"
                     count={list.watching.length}
                     action={
-                      <ToggleButton
-                        open={showWatching}
-                        onToggle={() => setShowWatching(!showWatching)}
-                      />
+                      !searching ? (
+                        <ToggleButton
+                          open={showWatching}
+                          onToggle={() => setShowWatching(!showWatching)}
+                        />
+                      ) : undefined
                     }
                   />
-                  {showWatching ? (
+                  {searching || showWatching ? (
                     <ConversationRows
                       devinAvatarUrl={state?.devinAvatarUrl}
                       draftKeys={draftKeys}
@@ -718,10 +849,12 @@ export function JobPage() {
                     label="Done"
                     count={list.done.length}
                     action={
-                      <ToggleButton open={showDone} onToggle={() => setShowDone(!showDone)} />
+                      !searching ? (
+                        <ToggleButton open={showDone} onToggle={() => setShowDone(!showDone)} />
+                      ) : undefined
                     }
                   />
-                  {showDone ? (
+                  {searching || showDone ? (
                     <ConversationRows
                       devinAvatarUrl={state?.devinAvatarUrl}
                       draftKeys={draftKeys}
@@ -732,38 +865,40 @@ export function JobPage() {
                   ) : null}
                 </section>
               ) : null}
-              <section className="flex flex-col">
-                <WorkGroupHeader
-                  label="Other work"
-                  count={list.other.length}
-                  action={
-                    list.slackConnected ? (
-                      <ToggleButton open={showOther} onToggle={() => setShowOther(!showOther)} />
-                    ) : undefined
-                  }
-                />
-                {otherOpen ? (
-                  !bootstrapped ? (
-                    <p className="px-3 py-1 text-xs text-muted-foreground">
-                      Loading work from your environments…
-                    </p>
-                  ) : list.includedProjects.length === 0 ? (
-                    <p className="px-3 py-1 text-xs text-muted-foreground">
-                      Choose folders from the menu to show T3 work that is not tied to a Slack
-                      conversation.
-                    </p>
-                  ) : list.other.length === 0 ? (
-                    <p className="px-3 py-1 text-xs text-muted-foreground">No other work.</p>
-                  ) : (
-                    <OtherWorkRows
-                      groups={list.other}
-                      projects={projects}
-                      selectedId={selectedId}
-                      onSelect={setSelectedId}
-                    />
-                  )
-                ) : null}
-              </section>
+              {!searching || list.other.length > 0 ? (
+                <section className="flex flex-col">
+                  <WorkGroupHeader
+                    label="Other work"
+                    count={list.other.length}
+                    action={
+                      !searching && list.slackConnected ? (
+                        <ToggleButton open={showOther} onToggle={() => setShowOther(!showOther)} />
+                      ) : undefined
+                    }
+                  />
+                  {otherOpen ? (
+                    !bootstrapped ? (
+                      <p className="px-3 py-1 text-xs text-muted-foreground">
+                        Loading work from your environments…
+                      </p>
+                    ) : list.includedProjects.length === 0 ? (
+                      <p className="px-3 py-1 text-xs text-muted-foreground">
+                        Choose folders from the menu to show T3 work that is not tied to a Slack
+                        conversation.
+                      </p>
+                    ) : list.other.length === 0 ? (
+                      <p className="px-3 py-1 text-xs text-muted-foreground">No other work.</p>
+                    ) : (
+                      <OtherWorkRows
+                        groups={list.other}
+                        projects={projects}
+                        selectedId={selectedId}
+                        onSelect={setSelectedId}
+                      />
+                    )
+                  ) : null}
+                </section>
+              ) : null}
             </WorkspacePageContainer>
           </div>
         </div>
@@ -797,6 +932,19 @@ export function JobPage() {
         projects={projects}
         configs={configs}
       />
+      <WorkRecapDialog
+        open={showRecap}
+        onOpenChange={setShowRecap}
+        environmentId={environmentId}
+        groups={fullList.recapGroups}
+        slack={state}
+        onSelect={(id) => {
+          const group = fullList.all.find((item) => item.id === id);
+          setSelectedId(`${group?.conversation || group?.pullRequest ? "c" : "w"}:${id}`);
+          setShowRecap(false);
+        }}
+      />
+      <WorkIgnoredDialog open={showIgnored} onOpenChange={setShowIgnored} />
     </SidebarInset>
   );
 }

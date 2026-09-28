@@ -28,6 +28,7 @@ import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 import { OtlpTracer, OtlpSerialization } from "effect/unstable/observability";
 
 import * as ServerConfig from "./config.ts";
+import * as SlackService from "./slack/SlackService.ts";
 import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
 import { githubMediaResponse } from "./assets/GitHubMediaFetch.ts";
 import { statMediaFile, streamMediaFile, type OpenMediaFile } from "./assets/MediaFile.ts";
@@ -408,6 +409,12 @@ export const assetRouteLayer = HttpRouter.add(
     );
     if (!asset) {
       return HttpServerResponse.text("Not Found", { status: 404 });
+    }
+    if (asset.kind === "slack-image") {
+      const slack = yield* SlackService.SlackService;
+      return yield* slack
+        .imageResponse(asset.url)
+        .pipe(Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 502 })));
     }
     if (asset.kind === "github-media") {
       return yield* githubMediaResponse(asset, request.headers).pipe(

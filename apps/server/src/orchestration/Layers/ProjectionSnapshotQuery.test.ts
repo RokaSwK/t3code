@@ -485,6 +485,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           unsettledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          waitingForMergeAt: null,
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           activeOrderKey: "hq",
@@ -614,6 +615,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           unsettledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          waitingForMergeAt: null,
           pinnedAt: "2026-02-24T00:00:01.000Z",
           pinOrderKey: "gm",
           activeOrderKey: "hq",
@@ -633,6 +635,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          hasChanges: true,
           backgroundLiveness: null,
           planProgress: null,
         },
@@ -3625,10 +3628,12 @@ it.effect("reads one sweep thread and its projects like the shell snapshot", () 
         VALUES (${projector}, 9, '2026-09-02T00:00:03Z')`;
     }
 
+    yield* sql`UPDATE projection_threads SET waiting_for_merge_at = '2026-09-02T00:00:00Z' WHERE thread_id = 't-linked'`;
     const full = yield* query.getShellSnapshot();
     // The seeded fields must reach the snapshot, or the parity check is empty.
     const linked = full.threads.find((thread) => thread.id === ThreadId.make("t-linked"));
     assert.strictEqual(full.snapshotSequence, 9);
+    assert.strictEqual(linked?.waitingForMergeAt, "2026-09-02T00:00:00Z");
     assert.strictEqual(linked?.linkedPullRequest?.number, 7);
     assert.strictEqual(linked?.latestTurn?.turnId, asTurnId("turn-1"));
     assert.strictEqual(linked?.session?.status, "ready");

@@ -155,6 +155,10 @@
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"
     },
+    "./state/work-calendar": {
+      "types": "./src/state/workCalendar.ts",
+      "default": "./src/state/workCalendar.ts"
+    },
     "./state/slack": {
       "types": "./src/state/slack.ts",
       "default": "./src/state/slack.ts"

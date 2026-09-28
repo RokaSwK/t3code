@@ -1,3 +1,4 @@
+import { readWorkCalendar, setWorkCalendar } from "./work/WorkCalendar.ts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -3209,6 +3210,7 @@ const makeWsRpcLayer = (
                 input.resource._tag === "native-app-icon" ||
                 // GitHub media names the repository it authenticates through itself.
                 input.resource._tag === "github-media" ||
+                input.resource._tag === "slack-image" ||
                 (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
               ) {
                 return yield* issueAssetUrl({ resource: input.resource });
@@ -3611,6 +3613,14 @@ const makeWsRpcLayer = (
         [WS_METHODS.slackResetInbox]: (_input) =>
           observeRpcEffect(WS_METHODS.slackResetInbox, slackService.resetInbox, {
             "rpc.aggregate": "slack",
+          }),
+        [WS_METHODS.workCalendarRead]: (input) =>
+          observeRpcEffect(WS_METHODS.workCalendarRead, readWorkCalendar(input), {
+            "rpc.aggregate": "work",
+          }),
+        [WS_METHODS.workCalendarSet]: (input) =>
+          observeRpcEffect(WS_METHODS.workCalendarSet, setWorkCalendar(input), {
+            "rpc.aggregate": "work",
           }),
         [WS_METHODS.slackGetThread]: (input) =>
           observeRpcEffect(WS_METHODS.slackGetThread, slackService.getThread(input), {

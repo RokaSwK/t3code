@@ -829,6 +829,7 @@ export const OrchestrationThread = Schema.Struct({
   // Optional so payloads from pre-snooze servers still decode.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  waitingForMergeAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Active pinned threads render in the pinned block. Settled and snoozed
   // threads remain in their respective shelves even when pinned.
   // Optional so payloads from pre-pinning servers still decode.
@@ -914,6 +915,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   unsettledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  waitingForMergeAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
@@ -925,6 +927,11 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  /**
+   * Some turn checkpointed file changes. The work recap uses it to tell work
+   * from conversation. Optional so old servers/clients interop.
+   */
+  hasChanges: Schema.optional(Schema.Boolean),
   /**
    * Native background work alive after the turn settles: "working" while
    * subagents/workflows run, "monitoring" when watch loops are the only
@@ -1186,10 +1193,17 @@ const ThreadSnoozeCommand = Schema.Struct({
   type: Schema.Literal("thread.snooze"),
   commandId: CommandId,
   threadId: ThreadId,
-  // The wake time. Event-based wake conditions (PR merged, review posted)
-  // will arrive as an optional condition field alongside this; time-based
-  // snooze is just the first kind of condition.
-  snoozedUntil: IsoDateTime,
+  // A merge wait has no timer; the server watches the linked pull requests.
+  snoozedUntil: Schema.NullOr(IsoDateTime),
+  untilMerge: Schema.optional(Schema.Boolean),
+});
+
+const ThreadMergeWaitResolveCommand = Schema.Struct({
+  type: Schema.Literal("thread.merge-wait.resolve"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  waitingForMergeAt: IsoDateTime,
+  outcome: Schema.Literals(["merged", "wake"]),
 });
 
 const ThreadUnsnoozeCommand = Schema.Struct({
@@ -1670,6 +1684,7 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadAutoSettleCommand,
+  ThreadMergeWaitResolveCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
   ThreadSessionSetCommand,
@@ -1817,13 +1832,17 @@ export const ThreadUnsettledPayload = Schema.Struct({
 
 export const ThreadSnoozedPayload = Schema.Struct({
   threadId: ThreadId,
-  snoozedUntil: IsoDateTime,
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
+  snoozedUntil: Schema.NullOr(IsoDateTime),
   snoozedAt: IsoDateTime,
+  waitingForMergeAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   updatedAt: IsoDateTime,
 });
 
 export const ThreadUnsnoozedPayload = Schema.Struct({
   threadId: ThreadId,
+  mergeWait: Schema.optional(Schema.Literals(["merged", "cancelled"])),
+  linkedSlackThreads: Schema.optional(ThreadSlackLinks),
   // user: explicit "wake now". activity: real work arrived (user message /
   // session coming alive) and the decider cleared the snooze — mirrors
   // thread.unsettled's activity resets. Timer wakes emit no event: clients

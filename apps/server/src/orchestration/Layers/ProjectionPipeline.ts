@@ -632,6 +632,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             unsettledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            waitingForMergeAt: null,
             pinnedAt: null,
             pinOrderKey: null,
             activeOrderKey: null,
@@ -730,6 +731,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             snoozedUntil: event.payload.snoozedUntil,
             snoozedAt: event.payload.snoozedAt,
+            waitingForMergeAt: event.payload.waitingForMergeAt ?? null,
             updatedAt: event.payload.updatedAt,
           });
           return;
@@ -746,6 +748,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             snoozedUntil: null,
             snoozedAt: null,
+            waitingForMergeAt: null,
             updatedAt: event.payload.updatedAt,
           });
           return;

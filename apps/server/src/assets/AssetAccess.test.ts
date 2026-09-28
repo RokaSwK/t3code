@@ -51,6 +51,20 @@ const testLayer = Layer.mergeAll(
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
 describe("AssetAccess", () => {
+  it.effect("signs Slack image URLs without embedding a Slack credential", () =>
+    Effect.gen(function* () {
+      const url = "https://files.slack.com/files-pri/T1-F1/screenshot.png";
+      const issued = yield* issueAssetUrl({ resource: { _tag: "slack-image", url } });
+      const suffix = issued.relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+      const separator = suffix.indexOf("/");
+      expect(yield* resolveAsset(suffix.slice(0, separator), suffix.slice(separator + 1))).toEqual({
+        kind: "slack-image",
+        url,
+        expiresAt: issued.expiresAt,
+      });
+    }).pipe(Effect.provide(testLayer)),
+  );
+
   it.effect("loads private media immediately after login and reuses the found credential", () => {
     let lookups = 0;
     const authorizations: Array<string | undefined> = [];

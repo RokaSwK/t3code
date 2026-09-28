@@ -14,6 +14,7 @@ import {
   AssetWorkspaceResolutionError,
   AssetWorkspaceRootNormalizationError,
   ToolActivityNativeAppReference,
+  SlackImageUrl,
 } from "@t3tools/contracts";
 import {
   audioMimeTypeFromExtension,
@@ -85,6 +86,12 @@ const PREVIEW_ASSET_EXTENSIONS = new Set([
 const AssetClaimsSchema = Schema.Union([
   Schema.Struct({
     version: Schema.Literal(1),
+    kind: Schema.Literal("slack-image"),
+    url: SlackImageUrl,
+    expiresAt: Schema.Number,
+  }),
+  Schema.Struct({
+    version: Schema.Literal(1),
     kind: Schema.Literal("workspace-file"),
     workspaceRoot: Schema.String,
     baseRelativePath: Schema.String,
@@ -153,6 +160,7 @@ const decodeAssetClaims = Schema.decodeUnknownOption(AssetClaimsJson);
 const encodeAssetClaims = Schema.encodeSync(AssetClaimsJson);
 
 export type ResolvedAsset =
+  | { readonly kind: "slack-image"; readonly url: string; readonly expiresAt: number }
   | {
       readonly kind: "file";
       readonly path: string;
@@ -676,6 +684,11 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       fileName = "native-app-icon.png";
       break;
     }
+    case "slack-image": {
+      claims = { version: 1, kind: "slack-image", url: input.resource.url, expiresAt };
+      fileName = "slack-image";
+      break;
+    }
     case "github-media": {
       const fetchUrl = githubMediaFetchUrl(input.resource.url);
       if (fetchUrl === null) {
@@ -791,6 +804,13 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       : null;
   }
 
+  if (claims.kind === "slack-image") {
+    return {
+      kind: "slack-image",
+      url: claims.url,
+      expiresAt: claims.expiresAt,
+    } satisfies ResolvedAsset;
+  }
   if (claims.kind === "github-media") {
     return {
       kind: "github-media",

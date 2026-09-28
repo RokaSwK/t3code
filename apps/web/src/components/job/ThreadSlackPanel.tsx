@@ -93,6 +93,7 @@ function SlackConversation({ threadRef, url }: { threadRef: ScopedThreadRef; url
         ? [detail.thread, ...detail.replies].map((message) => (
             <SlackMessageBody
               key={message.ts}
+              environmentId={threadRef.environmentId}
               message={message}
               onToggleReaction={(name, reacted) => {
                 void setReaction({

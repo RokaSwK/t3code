@@ -8,7 +8,14 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildWorkGroups, WORK_QUIET_MS, type WorkThread } from "./work.ts";
+import {
+  buildWorkGroups,
+  workItemKeys,
+  workMatchesMarks,
+  ungroupedWorkChannelThreads,
+  WORK_QUIET_MS,
+  type WorkThread,
+} from "./work.ts";
 
 const now = "2026-09-26T20:00:00.000Z";
 
@@ -387,5 +394,131 @@ describe("buildWorkGroups with the GitHub queue", () => {
       now: nowMs,
     });
     expect(groups.map((group) => group.pullRequest?.number)).toEqual([1]);
+  });
+
+  it("puts a GitHub PR under its channel conversation, including URL variants", () => {
+    const mention = conversation({
+      pullRequests: [
+        { ...pr(42), url: "https://github.com/OWNER/repo/pull/42/files?diff=split#top" },
+      ],
+    });
+    const unrelated = conversation({ channelId: "C2", permalink: permalink.replace("C1", "C2") });
+    const groups = buildWorkGroups([], {
+      channelThreads: [mention, unrelated],
+      github: { reviewRequests: [pr(42)], authored: [pr(42)] },
+      now: nowMs,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.conversation?.channelId).toBe("C1");
+    expect(groups[0]?.pullRequest).toBeNull();
+    expect(ungroupedWorkChannelThreads([mention, unrelated], groups)).toEqual([unrelated]);
+  });
+
+  it("retains all PRs and Slack links when conversations share work", () => {
+    const older = conversation({ pullRequests: [pr(42), pr(43)] });
+    const newer = conversation({
+      channelId: "C2",
+      permalink: permalink.replace("C1", "C2"),
+      latestReplyTs: slackTs(nowMs),
+      pullRequests: [pr(42)],
+    });
+    const groups = buildWorkGroups([], {
+      conversations: [older, newer],
+      channelThreads: [older, newer],
+      github: { reviewRequests: [], authored: [pr(42), pr(43)] },
+      now: nowMs,
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.conversation?.channelId).toBe("C2");
+    expect(groups[0]?.conversation?.pullRequests?.map((request) => request.number)).toEqual([
+      42, 43,
+    ]);
+    expect(groups[0]?.slackLinks).toHaveLength(2);
+    expect(ungroupedWorkChannelThreads([older, newer], groups)).toEqual([]);
+  });
+
+  it("does not promote channel messages for excluded GitHub owners", () => {
+    const mention = conversation({ pullRequests: [pr(42)] });
+    expect(
+      buildWorkGroups([], {
+        channelThreads: [mention],
+        github: { reviewRequests: [pr(42)], authored: [], owners: ["elsewhere"] },
+        now: nowMs,
+      }),
+    ).toEqual([]);
+  });
+});
+
+it("keeps an explicitly deferred approved PR in Waiting, including its Slack conversation", () => {
+  const url = "https://example.slack.com/archives/C123/p1727380800000000";
+  const waiting = thread("wait", {
+    waitingForMergeAt: now,
+    linkedSlackThreads: [url],
+    pullRequests: [pr({ snapshot: snapshot({ reviewDecision: "approved" }) })],
+  });
+  const conversation: SlackThread = {
+    channelId: "C123",
+    ts: "1727380800.000000",
+    channelName: "work",
+    channelKind: "channel",
+    permalink: url,
+    markdown: "Ship it",
+    fileCount: 0,
+    edited: false,
+    reactions: [],
+    authorName: "Pat",
+    replyCount: 1,
+    followed: true,
+    startedByMe: true,
+    lastReply: { by: "other", authorName: "Pat", ts: "1727380800.000001" },
+  };
+  expect(buildWorkGroups([waiting], { now: Date.parse(now) })[0]).toMatchObject({
+    status: "waiting",
+    reason: "Waiting for merge",
+  });
+  expect(
+    buildWorkGroups([waiting], { now: Date.parse(now), conversations: [conversation] })[0],
+  ).toMatchObject({ status: "waiting", reason: "Waiting for merge" });
+  const failed = {
+    ...waiting,
+    pullRequests: [pr({ snapshot: snapshot({ checksState: "failing" }) })],
+  };
+  expect(
+    buildWorkGroups([failed], { now: Date.parse(now), conversations: [conversation] })[0],
+  ).toMatchObject({ status: "needs", reason: "PR checks failing" });
+});
+
+describe("work dispositions", () => {
+  it("keeps ignored and planned identity when a standalone PR joins a Slack conversation", () => {
+    const request = {
+      url: "https://github.com/owner/repo/pull/42",
+      repository: "owner/repo",
+      number: 42,
+      title: "Fix",
+      isDraft: false,
+      updatedAt: now,
+    };
+    const standalone = buildWorkGroups([], {
+      now: Date.parse(now),
+      github: { reviewRequests: [request], authored: [] },
+    })[0]!;
+    const mark = { keys: workItemKeys(standalone), title: "Fix", at: Date.parse(now) };
+    const grouped = buildWorkGroups(
+      [
+        thread("linked", {
+          pullRequests: [pr()],
+          linkedSlackThreads: ["https://acme.slack.com/archives/C1/p1790000000000000"],
+        }),
+      ],
+      { now: Date.parse(now) },
+    )[0]!;
+    expect(workMatchesMarks(workItemKeys(grouped), [mark])).toBe(true);
+    expect(workMatchesMarks(workItemKeys(grouped), [])).toBe(false);
+    expect(
+      workMatchesMarks(
+        workItemKeys(buildWorkGroups([thread("unrelated")], { now: Date.parse(now) })[0]!),
+        [mark],
+      ),
+    ).toBe(false);
   });
 });
