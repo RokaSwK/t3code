@@ -435,6 +435,7 @@ describe("OrchestrationEngine", () => {
               updatedAt: projectionSnapshot.updatedAt,
             }),
           getDeletedWorktreeThreads: () => Effect.die("unused"),
+          listThreadIdsWithChanges: () => Effect.succeed([]),
           listThreadsWithPullRequests: () => Effect.die("unused"),
           getArchivedShellSnapshot: () =>
             Effect.succeed({

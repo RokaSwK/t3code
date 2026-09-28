@@ -151,6 +151,12 @@ export interface ProjectionSnapshotQueryShape {
     ProjectionRepositoryError
   >;
 
+  /** Threads where some turn checkpointed file changes: work, as opposed to conversation. */
+  readonly listThreadIdsWithChanges: () => Effect.Effect<
+    ReadonlyArray<ThreadId>,
+    ProjectionRepositoryError
+  >;
+
   /** Durable worktree ownership retained after thread deletion, including across restarts. */
   readonly getDeletedWorktreeThreads: () => Effect.Effect<
     ReadonlyArray<{

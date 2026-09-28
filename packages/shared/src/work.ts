@@ -37,7 +37,6 @@ export type WorkThread = { readonly environmentId: EnvironmentId } & Pick<
   | "hasPendingApprovals"
   | "hasPendingUserInput"
   | "hasActionableProposedPlan"
-  | "hasChanges"
   | "latestTurn"
   | "backgroundLiveness"
   | "linkedSlackThreads"

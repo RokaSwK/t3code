@@ -928,11 +928,6 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
   /**
-   * Some turn checkpointed file changes. The work recap uses it to tell work
-   * from conversation. Optional so old servers/clients interop.
-   */
-  hasChanges: Schema.optional(Schema.Boolean),
-  /**
    * Native background work alive after the turn settles: "working" while
    * subagents/workflows run, "monitoring" when watch loops are the only
    * live work. Optional so old servers/clients interop; absent = none.

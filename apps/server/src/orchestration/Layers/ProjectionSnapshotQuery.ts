@@ -136,7 +136,6 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     owner: Schema.NullOr(Schema.fromJsonString(ThreadOwner)),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
-    hasChanges: Schema.Number,
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -603,7 +602,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = projection_threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -655,7 +653,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads threads
         WHERE deleted_at IS NULL
@@ -685,6 +682,26 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ORDER BY t.deleted_at DESC, t.thread_id ASC
     `,
   });
+  const listThreadIdsWithChangesRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ threadId: ThreadId }),
+    execute: () => sql`
+      SELECT DISTINCT thread_id AS "threadId"
+      FROM projection_turns
+      WHERE checkpoint_files_json <> '[]'
+    `,
+  });
+  const listThreadIdsWithChanges: ProjectionSnapshotQueryShape["listThreadIdsWithChanges"] = () =>
+    listThreadIdsWithChangesRows(undefined).pipe(
+      Effect.map((rows) => rows.map((row) => row.threadId)),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listThreadIdsWithChanges:query",
+          "ProjectionSnapshotQuery.listThreadIdsWithChanges:decodeRows",
+        ),
+      ),
+    );
+
   const getDeletedWorktreeThreads: ProjectionSnapshotQueryShape["getDeletedWorktreeThreads"] = () =>
     listDeletedWorktreeRows(undefined).pipe(
       Effect.mapError(
@@ -734,7 +751,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = projection_threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -1342,7 +1358,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
-          EXISTS (SELECT 1 FROM projection_turns turns WHERE turns.thread_id = projection_threads.thread_id AND turns.checkpoint_files_json <> '[]') AS "hasChanges",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -2836,7 +2851,6 @@ pending_approval_requests AS (
                         hasPendingApprovals: row.pendingApprovalCount > 0,
                         hasPendingUserInput: row.pendingUserInputCount > 0,
                         hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                        hasChanges: row.hasChanges > 0,
                         backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
                           row.threadId,
                         ),
@@ -3026,7 +3040,6 @@ pending_approval_requests AS (
                   hasPendingApprovals: row.pendingApprovalCount > 0,
                   hasPendingUserInput: row.pendingUserInputCount > 0,
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                  hasChanges: row.hasChanges > 0,
                   backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
                     row.threadId,
                   ),
@@ -3379,7 +3392,6 @@ pending_approval_requests AS (
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
-        hasChanges: threadRow.value.hasChanges > 0,
         backgroundLiveness: threadBackgroundLiveness.getThreadBackgroundLiveness(
           threadRow.value.threadId,
         ),
@@ -3887,6 +3899,7 @@ pending_approval_requests AS (
     listThreadsWithPullRequests,
     getArchivedShellSnapshot,
     getDeletedWorktreeThreads,
+    listThreadIdsWithChanges,
     searchThreads,
     getSnapshotSequence,
     getCounts,

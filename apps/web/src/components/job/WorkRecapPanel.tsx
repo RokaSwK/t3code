@@ -1,10 +1,20 @@
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
-import type { EnvironmentId, SlackState, WorkCalendarEvent } from "@t3tools/contracts";
+import { type ComponentProps, type ReactNode, useCallback, useEffect, useState } from "react";
+import type {
+  EnvironmentId,
+  WorkCalendarEvent,
+  WorkItemMark,
+  WorkRecapInput,
+  WorkRecapItem,
+  WorkRecapView,
+} from "@t3tools/contracts";
+import { buildWorkPlan, recapWaitingGroups, workGroupTitle } from "@t3tools/shared/workRecap";
 import {
   CalendarIcon,
   CheckIcon,
+  ChevronRightIcon,
   CopyIcon,
   RefreshCwIcon,
+  SlackIcon,
   SparklesIcon,
   StarIcon,
   XIcon,
@@ -13,11 +23,12 @@ import { usePrimarySettings, useUpdatePrimarySettings } from "~/hooks/useSetting
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
-import { useProjects, useServerConfigs, useThreadShells } from "~/state/entities";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { workRecap } from "~/state/workRecap";
 import { PullRequestStateGlyph } from "../pullRequest/pullRequestPresentation";
+import { GitHubIcon } from "../Icons";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import {
   Dialog,
   DialogDescription,
@@ -29,30 +40,27 @@ import {
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { useWorkCalendar } from "./WorkCalendar";
-import {
-  includedWorkProjects,
-  workItemKeys,
-  workItemTitle,
-  workMatchesMarks,
-  type WorkGroup,
-} from "./workGroups";
+import { workItemKeys, workMatchesMarks, type WorkGroup } from "./workGroups";
 import {
   SlackChannelGlyph,
+  T3Logo,
   WORK_META_SEPARATOR,
   WorkGroupHeader,
   WorkRow,
   WorkStatusDot,
 } from "./workPresentation";
-import {
-  buildWorkAccomplishments,
-  buildWorkPlan,
-  localWorkDate,
-  type WorkAccomplishment,
-  workRecapFacts,
-  workRecapWindows,
-} from "./workRecap";
+import { localWorkDate, workRecapWindows } from "./workRecap";
 
 type RecapMode = "daily" | "weekly";
+
+/** A feature card: the server's feature, or the work it has not grouped yet. */
+interface RecapClusterView {
+  readonly title: string;
+  readonly description: string | null;
+  readonly items: ReadonlyArray<WorkRecapItem>;
+  readonly area: string | null;
+  readonly minor: boolean;
+}
 
 function openExternal(url: string) {
   void readLocalApi()?.shell.openExternal(url);
@@ -68,67 +76,90 @@ function groupSource(group: WorkGroup): "slack" | "github" | "t3" {
   return group.conversation ? "slack" : group.pullRequest ? "github" : "t3";
 }
 
-// Summaries survive closing the dialog; the same recap is never written twice in a session.
-const summaryCache = new Map<string, { readonly summary: string; readonly model: string }>();
-const summaryInFlight = new Set<string>();
+// The last view per recap survives closing the dialog, so reopening shows it at once.
+const lastViews = new Map<string, WorkRecapView>();
 
-function RecapSummary({
-  environmentId,
-  mode,
-  facts,
-}: {
-  readonly environmentId: EnvironmentId | null;
-  readonly mode: RecapMode;
-  readonly facts: string;
-}) {
-  const summarize = useAtomCommand(workRecap.summarize, { reportFailure: false });
-  const key = `${mode}\n${facts}`;
+/**
+ * The server's recap for this window: read what it has first, which is instant, then ask it to
+ * group new work and write a missing summary, which waits on the text generation model.
+ */
+function useWorkRecap(
+  environmentId: EnvironmentId | null,
+  input: Omit<WorkRecapInput, "write" | "regroup">,
+  ready: boolean,
+) {
+  const run = useAtomCommand(workRecap.recap, { reportFailure: false });
+  // The key is the request: a new window, mode, or meeting list is a new recap.
+  const key = JSON.stringify([environmentId, input]);
+  const [, setVersion] = useState(0);
+  const [writingKey, setWritingKey] = useState<string | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
-  const [, setWritten] = useState(0);
-  const result = summaryCache.get(key) ?? null;
-  const error = failedKey === key;
-  // Anything without a summary or a failure is being written.
-  const loading = environmentId !== null && result === null && !error;
 
-  const generate = useCallback(
-    async (input: { readonly mode: RecapMode; readonly facts: string }) => {
-      const runKey = `${input.mode}\n${input.facts}`;
-      if (!environmentId || summaryInFlight.has(runKey)) return;
-      summaryInFlight.add(runKey);
-      const response = await summarize({ environmentId, input });
-      summaryInFlight.delete(runKey);
-      if (response._tag === "Success") {
-        summaryCache.set(runKey, response.value);
-        setWritten((count) => count + 1);
-      } else setFailedKey(runKey);
+  const request = useCallback(
+    async (requestKey: string, write: boolean, regroup: boolean) => {
+      const [requestEnvironment, requestInput] = JSON.parse(requestKey) as [
+        EnvironmentId | null,
+        Omit<WorkRecapInput, "write" | "regroup">,
+      ];
+      if (!requestEnvironment) return null;
+      if (write) setWritingKey(requestKey);
+      const response = await run({
+        environmentId: requestEnvironment,
+        input: { ...requestInput, write, ...(regroup ? { regroup: true } : {}) },
+      });
+      if (write) setWritingKey((current) => (current === requestKey ? null : current));
+      if (response._tag !== "Success") {
+        setFailedKey(requestKey);
+        return null;
+      }
+      lastViews.set(requestKey, response.value);
+      setVersion((version) => version + 1);
+      return response.value;
     },
-    [environmentId, summarize],
+    [run],
   );
 
-  // A recap that has not been summarized yet (new mode or new work) is written on open.
   useEffect(() => {
-    if (!summaryCache.has(`${mode}\n${facts}`)) void generate({ mode, facts });
-  }, [mode, facts, generate]);
+    if (!ready) return;
+    void (async () => {
+      const view = await request(key, false, false);
+      if (view?.stale) await request(key, true, false);
+    })();
+  }, [key, ready, request]);
 
-  function regenerate() {
-    summaryCache.delete(key);
-    setFailedKey(null);
-    void generate({ mode, facts });
-  }
+  return {
+    view: lastViews.get(key) ?? null,
+    writing: writingKey === key,
+    failed: failedKey === key,
+    regroup: () => {
+      setFailedKey(null);
+      void request(key, true, true);
+    },
+  };
+}
 
+function RecapSummaryCard({
+  environmentId,
+  recap,
+}: {
+  readonly environmentId: EnvironmentId | null;
+  readonly recap: ReturnType<typeof useWorkRecap>;
+}) {
+  const summary = recap.view?.summary ?? null;
+  const loading = environmentId !== null && !summary && !recap.failed;
   return (
     <section className="rounded-lg border bg-muted/30 p-3">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <SparklesIcon aria-hidden className="size-3.5" />
         <span className="font-medium text-foreground">Summary</span>
-        {result && !loading ? <span className="truncate">· {result.model}</span> : null}
+        {summary ? <span className="truncate">· {summary.model}</span> : null}
         <Button
           className="ml-auto"
           size="icon-micro"
           variant="ghost-muted"
-          aria-label="Write the summary again"
-          disabled={loading || !environmentId}
-          onClick={regenerate}
+          aria-label="Group this work again and rewrite the summary"
+          disabled={recap.writing || !environmentId}
+          onClick={recap.regroup}
         >
           <RefreshCwIcon />
         </Button>
@@ -136,31 +167,129 @@ function RecapSummary({
       <div className="mt-2 text-sm leading-relaxed">
         {!environmentId ? (
           <p className="text-muted-foreground">Connect to an environment to write a summary.</p>
+        ) : recap.failed && !summary ? (
+          <p role="alert" className="text-destructive">
+            The recap could not be written. Check the text generation model in Settings.
+          </p>
         ) : loading ? (
           <div className="space-y-2 py-1" aria-label="Writing the summary">
             <Skeleton className="h-3.5 w-full" />
             <Skeleton className="h-3.5 w-11/12" />
             <Skeleton className="h-3.5 w-2/3" />
           </div>
-        ) : error ? (
-          <p role="alert" className="text-destructive">
-            The summary could not be written. Check the text generation model in Settings.
-          </p>
-        ) : result ? (
-          <p className="whitespace-pre-line">{result.summary}</p>
+        ) : summary ? (
+          <p className="whitespace-pre-line">{summary.text}</p>
         ) : null}
       </div>
     </section>
   );
 }
 
+const SOURCE_ORDER = ["github", "t3", "slack"] as const;
+
+/** Which sources a cluster draws from, as logos with counts. */
+function ClusterSources({ items }: { readonly items: ReadonlyArray<WorkRecapItem> }) {
+  // The header already counts items; per-source counts only help when sources mix.
+  const mixed = new Set(items.map((item) => item.source)).size > 1;
+  return (
+    <span className="flex shrink-0 items-center gap-2 text-2xs tabular-nums text-muted-foreground">
+      {SOURCE_ORDER.map((source) => {
+        const count = items.filter((item) => item.source === source).length;
+        if (count === 0) return null;
+        const label =
+          source === "github"
+            ? "pull requests"
+            : source === "slack"
+              ? "Slack conversations"
+              : "T3 threads";
+        return (
+          <span
+            key={source}
+            className="inline-flex items-center gap-0.5"
+            aria-label={`${count} ${label}`}
+          >
+            {source === "github" ? (
+              <GitHubIcon aria-hidden className="size-3" />
+            ) : source === "slack" ? (
+              <SlackIcon aria-hidden className="size-3" />
+            ) : (
+              <T3Logo />
+            )}
+            {mixed ? count : null}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+function RecapCluster({
+  cluster,
+  highlights,
+  renderRow,
+}: {
+  readonly cluster: RecapClusterView;
+  readonly highlights: ReadonlyArray<WorkItemMark> | null;
+  readonly renderRow: (item: WorkRecapItem, compact: boolean) => ReactNode;
+}) {
+  const repositories = new Set(
+    cluster.items.map((item) => item.pullRequest?.label.split("#")[0] ?? null),
+  );
+  const compact = repositories.size === 1 && !repositories.has(null);
+  const starred = highlights
+    ? cluster.items.filter((item) => workMatchesMarks(item.keys, highlights)).length
+    : 0;
+  return (
+    <div className="rounded-lg border">
+      <Collapsible>
+        <CollapsibleTrigger className="group flex w-full items-start gap-2 rounded-lg px-3 py-2.5 text-left hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+          <ChevronRightIcon
+            aria-hidden
+            className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-data-[panel-open]:rotate-90"
+          />
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate text-sm font-medium">{cluster.title}</span>
+              <span className="shrink-0 rounded-full bg-muted px-1.5 text-2xs tabular-nums text-muted-foreground">
+                {cluster.items.length}
+              </span>
+              {starred > 0 ? (
+                <StarIcon
+                  aria-label={`${starred} starred`}
+                  className="size-3 shrink-0 fill-warning text-warning"
+                />
+              ) : null}
+              <span className="ml-auto">
+                <ClusterSources items={cluster.items} />
+              </span>
+            </span>
+            {cluster.description ? (
+              <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
+                {cluster.description}
+              </span>
+            ) : null}
+          </span>
+        </CollapsibleTrigger>
+        <CollapsiblePanel>
+          <div className="space-y-0.5 border-t p-1">
+            {cluster.items.map((item) => renderRow(item, compact))}
+          </div>
+        </CollapsiblePanel>
+      </Collapsible>
+    </div>
+  );
+}
+
 function AccomplishmentRow({
   item,
+  compact = false,
   highlighted,
   onToggleHighlight,
   onSelect,
 }: {
-  readonly item: WorkAccomplishment;
+  readonly item: WorkRecapItem;
+  /** Inside a card of one repository: show `#123` and let the merged glyph speak. */
+  readonly compact?: boolean;
   readonly highlighted?: boolean;
   readonly onToggleHighlight?: () => void;
   readonly onSelect: (id: string) => void;
@@ -193,11 +322,17 @@ function AccomplishmentRow({
                 </span>
               ) : item.pullRequest ? (
                 <span className="min-w-0 max-w-48 truncate font-mono">
-                  {item.pullRequest.label}
+                  {compact
+                    ? `#${item.pullRequest.label.split("#").at(-1)}`
+                    : item.pullRequest.label}
                 </span>
               ) : null}
-              {item.channel || item.pullRequest ? WORK_META_SEPARATOR : null}
-              <span className="min-w-0 truncate">{item.evidence}</span>
+              {compact && item.evidence === "PR merged" ? null : (
+                <>
+                  {item.channel || item.pullRequest ? WORK_META_SEPARATOR : null}
+                  <span className="min-w-0 truncate">{item.evidence}</span>
+                </>
+              )}
             </>
           }
           updatedAt={new Date(item.at).toISOString()}
@@ -224,61 +359,30 @@ function AccomplishmentRow({
 export function WorkRecapPanel({
   environmentId,
   groups,
-  slack,
   onSelect,
 }: {
   readonly environmentId: EnvironmentId | null;
   readonly groups: ReadonlyArray<WorkGroup>;
-  readonly slack: SlackState | null;
   readonly onSelect: (id: string) => void;
 }) {
   const settings = usePrimarySettings();
   const update = useUpdatePrimarySettings();
-  const threads = useThreadShells();
-  const projects = useProjects();
-  const configs = useServerConfigs();
   const minute = useNowMinute();
   const now = new Date(`${minute}:00Z`);
   const date = localWorkDate(now);
-  const { today, lastWorkday } = workRecapWindows(now);
+  const { today, lastWorkday, week } = workRecapWindows(now);
+  const startOfDay = new Date(today);
+  const tomorrow = new Date(
+    startOfDay.getFullYear(),
+    startOfDay.getMonth(),
+    startOfDay.getDate() + 1,
+  ).getTime();
   const [mode, setMode] = useState<RecapMode>("daily");
   const [copied, setCopied] = useState(false);
   const calendar = useWorkCalendar(environmentId);
   const ignored = settings.workIgnoredItems ?? [];
   const highlights = settings.workDemoHighlights ?? [];
-
-  const accomplishments = useMemo(() => {
-    const included = new Set(
-      includedWorkProjects(projects, configs).map(
-        (project) => `${project.environmentId}:${project.id}`,
-      ),
-    );
-    return buildWorkAccomplishments({
-      groups,
-      threads: threads.filter((thread) =>
-        included.has(`${thread.environmentId}:${thread.projectId}`),
-      ),
-      slack,
-      ignored: settings.workIgnoredItems ?? [],
-      githubOwners: settings.workGitHubOwners,
-      since: workRecapWindows(new Date(`${minute}:00Z`)).week,
-      now: Date.parse(`${minute}:59Z`),
-    });
-  }, [
-    groups,
-    threads,
-    projects,
-    configs,
-    slack,
-    settings.workIgnoredItems,
-    settings.workGitHubOwners,
-    minute,
-  ]);
-
-  const completed =
-    mode === "daily"
-      ? accomplishments.filter((item) => item.at >= lastWorkday && item.at < today)
-      : accomplishments;
+  const events = calendar.result?.connected ? calendar.result.events : [];
   const period =
     mode === "weekly"
       ? now.getDay() === 1
@@ -287,21 +391,99 @@ export function WorkRecapPanel({
       : today - lastWorkday <= 86_400_000 * 1.5
         ? "yesterday"
         : `since ${new Date(lastWorkday).toLocaleDateString([], { weekday: "long" })}`;
+  const meetings =
+    mode === "daily"
+      ? events.slice(0, 30).map((event) => `${eventTime(event)} ${event.title}`.slice(0, 200))
+      : [];
 
-  // Grouped by project, busiest first, so the list reads as areas of work.
-  const sections = new Map<string, WorkAccomplishment[]>();
-  for (const item of completed) {
-    const title =
-      (item.project &&
-        projects.find(
-          (project) =>
-            project.environmentId === item.project!.environmentId &&
-            project.id === item.project!.projectId,
-        )?.title) ||
-      (item.source === "slack" ? "Slack" : item.source === "github" ? "GitHub" : "Other");
-    sections.set(title, [...(sections.get(title) ?? []), item]);
+  // The daily standup ends at midnight; the weekly demo includes today. Both windows only move
+  // at midnight, so an open dialog does not ask the server again every minute.
+  const recap = useWorkRecap(
+    environmentId,
+    {
+      mode,
+      since: mode === "daily" ? lastWorkday : week,
+      until: mode === "daily" ? today : tomorrow,
+      period,
+      date,
+      dayStart: new Date(today).toISOString(),
+      dayEnd: new Date(tomorrow).toISOString(),
+      ...(meetings.length > 0 ? { meetings } : {}),
+    },
+    // Meetings are part of the standup; wait for the calendar so it is written once.
+    mode === "weekly" || !calendar.loading,
+  );
+  const view = recap.view;
+  const items = view?.items ?? [];
+  const itemsByKey = new Map(items.map((item) => [item.keys[0]!, item]));
+  const clusters: RecapClusterView[] = [
+    ...(view?.features ?? []).map((feature) => ({
+      title: feature.title,
+      description: feature.description || null,
+      items: feature.items.flatMap((key) => itemsByKey.get(key) ?? []),
+      area: feature.area || null,
+      minor: feature.minor,
+    })),
+    ...(view && view.unassigned.length > 0
+      ? [
+          {
+            title: recap.writing ? "Grouping new work…" : "Not grouped yet",
+            description: null,
+            items: view.unassigned.flatMap((key) => itemsByKey.get(key) ?? []),
+            area: "Other",
+            minor: false,
+          },
+        ]
+      : []),
+  ];
+  const minorClusters = clusters.filter((cluster) => cluster.minor);
+
+  // Features under the areas the model named (Support, Mobile, …), biggest first. An area of
+  // one item gets no heading of its own; those gather under "Other".
+  const byArea = new Map<string, RecapClusterView[]>();
+  for (const cluster of clusters) {
+    if (cluster.minor) continue;
+    const area = cluster.area ?? "";
+    byArea.set(area, [...(byArea.get(area) ?? []), cluster]);
   }
-  const sectionEntries = [...sections].toSorted(([, a], [, b]) => b.length - a.length);
+  const other: RecapClusterView[] = [];
+  const areaSections = [...byArea]
+    .flatMap(([area, list]) => {
+      const count = list.reduce((total, cluster) => total + cluster.items.length, 0);
+      if (area === "Other" || !area || (count === 1 && byArea.size > 1)) {
+        other.push(...list);
+        return [];
+      }
+      return [
+        {
+          area,
+          clusters: list.toSorted((a, b) => b.items.length - a.items.length),
+          count,
+        },
+      ];
+    })
+    .toSorted((a, b) => b.count - a.count)
+    .concat(
+      other.length > 0
+        ? [
+            {
+              area: "Other",
+              clusters: other,
+              count: other.reduce((total, cluster) => total + cluster.items.length, 0),
+            },
+          ]
+        : [],
+    );
+  const smallerThings: RecapClusterView | null =
+    minorClusters.length > 0
+      ? {
+          title: "Smaller things",
+          description: minorClusters.map((cluster) => cluster.title).join(" · "),
+          items: minorClusters.flatMap((cluster) => cluster.items),
+          area: null,
+          minor: true,
+        }
+      : null;
 
   const planned = buildWorkPlan(
     settings.workDayPlan?.date === date ? settings.workDayPlan.items : [],
@@ -312,44 +494,32 @@ export function WorkRecapPanel({
     item,
     group: groups.find((candidate) => workMatchesMarks(workItemKeys(candidate), [item])),
   }));
-  const waiting = groups.filter(
-    (group) =>
-      group.status === "waiting" &&
-      group.owner === null &&
-      !workMatchesMarks(workItemKeys(group), ignored),
+  const waiting = mode === "daily" ? recapWaitingGroups(groups, ignored, now.getTime()) : [];
+  const waitingTitles = new Map(
+    (view?.waitingTitles ?? []).map((entry) => [entry.groupId, entry.title]),
   );
-  const events = calendar.result?.connected ? calendar.result.events : [];
-
-  const facts = workRecapFacts({
-    period,
-    sections: sectionEntries,
-    highlights: mode === "weekly" ? highlights : [],
-    planned: mode === "daily" ? planned.map((item) => item.title) : [],
-    meetings: mode === "daily" ? events.map((event) => `${eventTime(event)} ${event.title}`) : [],
-    waiting:
-      mode === "daily"
-        ? waiting.map(
-            (group) => `${workItemTitle(group)}${group.reason ? ` (${group.reason})` : ""}`,
-          )
-        : [],
-  });
 
   async function copy() {
-    const summary = summaryCache.get(`${mode}\n${facts}`)?.summary;
     const lines = [
       mode === "daily" ? `Standup · ${period}` : `Weekly demo · ${period}`,
-      ...(summary ? ["", summary] : []),
+      ...(view?.summary ? ["", view.summary.text] : []),
       "",
-      ...sectionEntries.flatMap(([title, items]) => [
-        title,
-        ...items.map(
-          (item) =>
-            `${workMatchesMarks(item.keys, highlights) && mode === "weekly" ? "★" : "•"} ${item.title}${item.url ? ` ${item.url}` : ""}`,
-        ),
-        "",
+      ...[
+        ...areaSections,
+        ...(smallerThings ? [{ area: null, clusters: [smallerThings] }] : []),
+      ].flatMap((section) => [
+        ...(section.area ? [section.area.toUpperCase()] : []),
+        ...section.clusters.flatMap(({ title, description, items: clusterItems }) => [
+          description ? `${title} — ${description}` : title,
+          ...clusterItems.map(
+            (item) =>
+              `  ${workMatchesMarks(item.keys, highlights) && mode === "weekly" ? "★" : "•"} ${item.title}${item.url ? ` ${item.url}` : ""}`,
+          ),
+          "",
+        ]),
       ]),
       ...(mode === "daily" && planned.length > 0
-        ? ["Today", ...planned.map((item) => `• ${item.title}`), ""]
+        ? ["TODAY", ...planned.map((item) => `• ${item.title}`), ""]
         : []),
     ];
     await navigator.clipboard.writeText(lines.join("\n").trim()).catch(() => undefined);
@@ -357,8 +527,28 @@ export function WorkRecapPanel({
     setTimeout(() => setCopied(false), 1500);
   }
 
-  const shippedCount = completed.length;
-  const mergedCount = completed.filter((item) => item.pullRequest?.state === "merged").length;
+  const renderRow = (item: WorkRecapItem, compact: boolean) => (
+    <AccomplishmentRow
+      key={item.keys.join("|")}
+      item={item}
+      compact={compact}
+      onSelect={onSelect}
+      {...(mode === "weekly"
+        ? {
+            highlighted: workMatchesMarks(item.keys, highlights),
+            onToggleHighlight: () =>
+              update({
+                workDemoHighlights: workMatchesMarks(item.keys, highlights)
+                  ? highlights.filter((mark) => !workMatchesMarks(item.keys, [mark]))
+                  : [...highlights, { keys: item.keys, title: item.title, at: item.at }],
+              }),
+          }
+        : {})}
+    />
+  );
+
+  const shippedCount = items.length;
+  const mergedCount = items.filter((item) => item.pullRequest?.state === "merged").length;
 
   return (
     <div className="space-y-5">
@@ -380,7 +570,7 @@ export function WorkRecapPanel({
         </Button>
       </div>
 
-      <RecapSummary environmentId={environmentId} mode={mode} facts={facts} />
+      <RecapSummaryCard environmentId={environmentId} recap={recap} />
 
       <div className="-mx-3 space-y-4">
         <div className="space-y-1">
@@ -388,54 +578,60 @@ export function WorkRecapPanel({
             label={`Done ${period}`}
             count={shippedCount}
             action={
-              mergedCount > 0 ? (
-                <span className="shrink-0">
-                  {mergedCount} merged {mergedCount === 1 ? "PR" : "PRs"}
-                </span>
-              ) : undefined
+              <span className="shrink-0">
+                {recap.writing && (view?.unassigned.length ?? 0) > 0
+                  ? "Grouping new work…"
+                  : mergedCount > 0
+                    ? `${mergedCount} merged ${mergedCount === 1 ? "PR" : "PRs"}`
+                    : null}
+              </span>
             }
           />
-          {shippedCount === 0 ? (
+          {view && shippedCount === 0 ? (
             <p className="px-3 py-2 text-sm text-muted-foreground">
               Nothing finished {period}. Work counts once a thread changes files, a PR merges, or
               you mark your own conversation done.
             </p>
           ) : null}
         </div>
-        {sectionEntries.map(([title, items]) => (
-          <div key={title} className="space-y-0.5">
-            <div className="px-3 pb-0.5 text-2xs font-medium text-muted-foreground/70">{title}</div>
-            {items.map((item) => (
-              <AccomplishmentRow
-                key={item.keys.join("|")}
-                item={item}
-                onSelect={onSelect}
-                {...(mode === "weekly"
-                  ? {
-                      highlighted: workMatchesMarks(item.keys, highlights),
-                      onToggleHighlight: () =>
-                        update({
-                          workDemoHighlights: workMatchesMarks(item.keys, highlights)
-                            ? highlights.filter((mark) => !workMatchesMarks(item.keys, [mark]))
-                            : [...highlights, { keys: item.keys, title: item.title, at: item.at }],
-                        }),
-                    }
-                  : {})}
-              />
+        {shippedCount > 0 ? (
+          <div className="space-y-5 px-3">
+            {areaSections.map((section) => (
+              <section key={section.area ?? ""} className="space-y-2">
+                {section.area ? (
+                  <div className="flex items-baseline gap-2">
+                    <h4 className="text-sm font-semibold">{section.area}</h4>
+                    <span className="text-xs tabular-nums text-muted-foreground">
+                      {section.count} {section.count === 1 ? "item" : "items"}
+                    </span>
+                  </div>
+                ) : null}
+                {section.clusters.map((cluster) => (
+                  <RecapCluster
+                    key={`${cluster.title}:${cluster.items[0]?.keys[0] ?? ""}`}
+                    cluster={cluster}
+                    highlights={mode === "weekly" ? highlights : null}
+                    renderRow={renderRow}
+                  />
+                ))}
+              </section>
             ))}
+            {smallerThings ? (
+              <RecapCluster
+                cluster={smallerThings}
+                highlights={mode === "weekly" ? highlights : null}
+                renderRow={renderRow}
+              />
+            ) : null}
           </div>
-        ))}
+        ) : null}
 
         {mode === "daily" ? (
           <>
-            <div className="space-y-0.5">
-              <WorkGroupHeader label="Planned today" count={planned.length} />
-              {plannedGroups.length === 0 ? (
-                <p className="px-3 py-2 text-sm text-muted-foreground">
-                  Open a work item and choose “Plan for today”.
-                </p>
-              ) : (
-                plannedGroups.map(({ item, group }, index) => (
+            {plannedGroups.length > 0 ? (
+              <div className="space-y-0.5">
+                <WorkGroupHeader label="Planned today" count={planned.length} />
+                {plannedGroups.map(({ item, group }, index) => (
                   <div key={item.keys.join("|")} className="flex items-center gap-1">
                     <div className="min-w-0 flex-1">
                       <WorkRow
@@ -469,58 +665,67 @@ export function WorkRecapPanel({
                       <XIcon />
                     </Button>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            ) : null}
 
-            <div className="space-y-0.5">
-              <WorkGroupHeader
-                label="Meetings"
-                count={events.length}
-                action={
-                  <Button
-                    size="icon-micro"
-                    variant="ghost-muted"
-                    aria-label="Refresh calendar"
-                    disabled={calendar.loading}
-                    onClick={() => void calendar.refresh()}
-                  >
-                    <RefreshCwIcon />
-                  </Button>
-                }
-              />
-              {calendar.error ? (
-                <p role="alert" className="px-3 py-2 text-sm text-destructive">
-                  {calendar.error}
-                </p>
-              ) : !calendar.loading && !calendar.result?.connected ? (
-                <p className="px-3 py-2 text-sm text-muted-foreground">
-                  Connect Google Calendar in Settings → Work.
-                </p>
-              ) : events.length === 0 && !calendar.loading ? (
-                <p className="px-3 py-2 text-sm text-muted-foreground">No meetings today.</p>
-              ) : (
-                events.map((event) => (
-                  <div key={event.id} className="flex items-start gap-2 px-3 py-1.5">
-                    <CalendarIcon
-                      aria-hidden
-                      className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-                    />
-                    <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
-                      {eventTime(event)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{event.title}</span>
-                      {event.location ? (
-                        <span className="block truncate text-2xs text-muted-foreground">
-                          {event.location}
-                        </span>
-                      ) : null}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
+            {events.length > 0 || calendar.error ? (
+              <div className="space-y-0.5">
+                <WorkGroupHeader
+                  label="Meetings"
+                  count={events.length}
+                  action={
+                    <Button
+                      size="icon-micro"
+                      variant="ghost-muted"
+                      aria-label="Refresh calendar"
+                      disabled={calendar.loading}
+                      onClick={() => void calendar.refresh()}
+                    >
+                      <RefreshCwIcon />
+                    </Button>
+                  }
+                />
+                {calendar.error ? (
+                  <p role="alert" className="px-3 py-2 text-sm text-destructive">
+                    {calendar.error}
+                  </p>
+                ) : (
+                  events.map((event) => (
+                    <div key={event.id} className="flex items-start gap-2 px-3 py-1.5">
+                      <CalendarIcon
+                        aria-hidden
+                        className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                      />
+                      <span className="w-16 shrink-0 text-xs tabular-nums text-muted-foreground">
+                        {eventTime(event)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{event.title}</span>
+                        {event.location ? (
+                          <span className="block truncate text-2xs text-muted-foreground">
+                            {event.location}
+                          </span>
+                        ) : null}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+
+            {plannedGroups.length === 0 &&
+            events.length === 0 &&
+            !calendar.error &&
+            !calendar.loading ? (
+              <p className="px-3 text-xs text-muted-foreground">
+                No plan or meetings for today. Choose “Plan for today” on a work item
+                {calendar.result?.connected
+                  ? ""
+                  : ", or connect Google Calendar in Settings → Work"}
+                .
+              </p>
+            ) : null}
 
             {waiting.length > 0 ? (
               <div className="space-y-0.5">
@@ -532,7 +737,7 @@ export function WorkRecapPanel({
                     selected={false}
                     glyph={<WorkStatusDot status="waiting" reason={group.reason} />}
                     source={groupSource(group)}
-                    title={workItemTitle(group)}
+                    title={waitingTitles.get(group.id) ?? workGroupTitle(group)}
                     meta={
                       group.conversation ? (
                         <>
@@ -556,7 +761,7 @@ export function WorkRecapPanel({
           </>
         ) : (
           <p className="px-3 text-xs text-muted-foreground">
-            Star what you want to show. Starred work leads the summary and the copied text.
+            Star what you want to show; stars carry into the copied text.
           </p>
         )}
       </div>

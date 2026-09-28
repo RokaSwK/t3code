@@ -310,7 +310,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
-    generateWorkRecap: () => Effect.succeed({ summary: "Shipped the workflow." }),
+    generateStructured: () => Effect.die("generateStructured is not used by git"),
     ...overrides,
   };
 
@@ -359,7 +359,7 @@ function createTextGeneration(
             }),
         ),
       ),
-    generateWorkRecap: implementation.generateWorkRecap,
+    generateStructured: implementation.generateStructured,
   };
 }
 

@@ -29,11 +29,19 @@ Choose **Ignore** on an item to hide it without counting it as completed. Restor
 ## Standups and weekly demos
 
 Open **Recap** in Work for what you finished since your last workday (Friday, on a Monday), with
-today's plan and meetings, or for this week's work in the weekly demo view. The **Text generation
-model** from **Settings → General** writes a short summary on top; the refresh button writes it again.
+today's plan and meetings, or for this week's work in the weekly demo view. Finished work is grouped
+into features under areas like Support or Mobile, so a PR, the thread that wrote it, and the Slack
+request behind it sit together; expand a feature to see each item. Chores fold into **Smaller
+things**. The **Text generation model** from **Settings → General** names the features and writes a
+short summary on top.
+
+Features are kept: new work joins the features it belongs to, so the recap reads the same each time
+you open it and the daily and weekly views agree. The first recap of a busy week takes a minute or
+two to group; later opens are instant. The refresh button next to the summary groups the period again
+from scratch and rewrites the summary.
+
 Choose **Plan for today** on work items to build your daily plan. In the weekly view, star the work
-you want to demo; starred work leads the summary. **Copy** puts the summary and the linked list on
-your clipboard.
+you want to demo. **Copy** puts the summary and the grouped, linked list on your clipboard.
 
 The recap counts merged PRs, settled T3 threads that changed files, and conversations you marked
 done when you started them or worked on them in a thread or PR. Questions, quiet conversations,

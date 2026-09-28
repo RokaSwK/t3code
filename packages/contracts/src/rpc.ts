@@ -4,11 +4,7 @@ import {
   WorkCalendarResult,
   WorkCalendarError,
 } from "./workCalendar.ts";
-import {
-  WorkRecapSummaryError,
-  WorkRecapSummaryInput,
-  WorkRecapSummaryResult,
-} from "./workRecap.ts";
+import { WorkRecapError, WorkRecapInput, WorkRecapView } from "./workRecap.ts";
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -406,7 +402,7 @@ export const WS_METHODS = {
   slackResetInbox: "slack.resetInbox",
   workCalendarRead: "work.calendarRead",
   workCalendarSet: "work.calendarSet",
-  workRecapSummary: "work.recapSummary",
+  workRecap: "work.recap",
   slackGetThread: "slack.getThread",
   slackGetReplies: "slack.getReplies",
   slackSetReaction: "slack.setReaction",
@@ -1353,10 +1349,10 @@ const WsWorkCalendarReadRpc = Rpc.make(WS_METHODS.workCalendarRead, {
   success: WorkCalendarResult,
   error: Schema.Union([WorkCalendarError, EnvironmentAuthorizationError]),
 });
-const WsWorkRecapSummaryRpc = Rpc.make(WS_METHODS.workRecapSummary, {
-  payload: WorkRecapSummaryInput,
-  success: WorkRecapSummaryResult,
-  error: Schema.Union([WorkRecapSummaryError, EnvironmentAuthorizationError]),
+const WsWorkRecapRpc = Rpc.make(WS_METHODS.workRecap, {
+  payload: WorkRecapInput,
+  success: WorkRecapView,
+  error: Schema.Union([WorkRecapError, EnvironmentAuthorizationError]),
 });
 const WsWorkCalendarSetRpc = Rpc.make(WS_METHODS.workCalendarSet, {
   payload: WorkCalendarSetInput,
@@ -1738,7 +1734,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeDeviceStateRpc,
   WsWorkCalendarReadRpc,
   WsWorkCalendarSetRpc,
-  WsWorkRecapSummaryRpc,
+  WsWorkRecapRpc,
   WsSlackConnectRpc,
   WsSlackCompleteConnectRpc,
   WsSlackCancelConnectRpc,

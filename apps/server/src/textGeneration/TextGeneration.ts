@@ -1,6 +1,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Schema from "effect/Schema";
 import type { ChatAttachment, ModelSelection, ProviderInstanceId } from "@t3tools/contracts";
 import { TextGenerationError } from "@t3tools/contracts";
 
@@ -75,17 +76,13 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
-export interface WorkRecapGenerationInput {
+export interface StructuredGenerationInput<S extends Schema.Top> {
   cwd: string;
-  mode: "daily" | "weekly";
-  /** The recap's items as plain lines, built by the client from what the Work page shows. */
-  facts: string;
+  prompt: string;
+  /** The JSON the model must return; providers pass it as their structured-output schema. */
+  outputSchema: S;
   /** What model and provider to use for generation. */
   modelSelection: ModelSelection;
-}
-
-export interface WorkRecapGenerationResult {
-  summary: string;
 }
 
 /**
@@ -120,10 +117,13 @@ export class TextGeneration extends Context.Service<
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
 
-    /** Summarize a daily standup or weekly demo from the Work recap's items. */
-    readonly generateWorkRecap: (
-      input: WorkRecapGenerationInput,
-    ) => Effect.Effect<WorkRecapGenerationResult, TextGenerationError>;
+    /**
+     * Run a caller-owned prompt and decode the model's JSON with the caller's schema. Features
+     * keep their prompts next to their own code; providers only know how to return JSON.
+     */
+    readonly generateStructured: <S extends Schema.Top>(
+      input: StructuredGenerationInput<S>,
+    ) => Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -132,7 +132,7 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
-  | "generateWorkRecap";
+  | "generateStructured";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -185,9 +185,9 @@ export const make = Effect.gen(function* () {
           }),
         ),
       ),
-    generateWorkRecap: (input) =>
-      resolveInstance(registry, "generateWorkRecap", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateWorkRecap(input)),
+    generateStructured: <S extends Schema.Top>(input: StructuredGenerationInput<S>) =>
+      resolveInstance(registry, "generateStructured", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateStructured(input)),
       ),
   });
 });

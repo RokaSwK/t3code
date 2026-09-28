@@ -7,9 +7,9 @@ export function createWorkRecapEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
-    summarize: createEnvironmentRpcCommand(runtime, {
-      label: "work:recap-summary",
-      tag: WS_METHODS.workRecapSummary,
+    recap: createEnvironmentRpcCommand(runtime, {
+      label: "work:recap",
+      tag: WS_METHODS.workRecap,
     }),
   };
 }

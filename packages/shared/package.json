@@ -203,6 +203,10 @@
       "types": "./src/work.ts",
       "import": "./src/work.ts"
     },
+    "./workRecap": {
+      "types": "./src/workRecap.ts",
+      "import": "./src/workRecap.ts"
+    },
     "./threadPullRequests": {
       "types": "./src/threadPullRequests.ts",
       "import": "./src/threadPullRequests.ts"

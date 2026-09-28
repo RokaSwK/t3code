@@ -937,7 +937,6 @@ export function JobPage() {
         onOpenChange={setShowRecap}
         environmentId={environmentId}
         groups={fullList.recapGroups}
-        slack={state}
         onSelect={(id) => {
           const group = fullList.all.find((item) => item.id === id);
           setSelectedId(`${group?.conversation || group?.pullRequest ? "c" : "w"}:${id}`);

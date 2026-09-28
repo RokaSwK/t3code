@@ -1,5 +1,5 @@
 import { readWorkCalendar, setWorkCalendar } from "./work/WorkCalendar.ts";
-import { summarizeWorkRecap } from "./work/WorkRecapSummary.ts";
+import * as WorkRecap from "./work/WorkRecap.ts";
 import {
   sameUsageLimitCommandCoverage,
   withUsageLimitsCommands,
@@ -580,6 +580,7 @@ const makeWsRpcLayer = (
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
+      const workRecap = yield* WorkRecap.WorkRecap;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
@@ -3619,8 +3620,8 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.workCalendarRead, readWorkCalendar(input), {
             "rpc.aggregate": "work",
           }),
-        [WS_METHODS.workRecapSummary]: (input) =>
-          observeRpcEffect(WS_METHODS.workRecapSummary, summarizeWorkRecap(input), {
+        [WS_METHODS.workRecap]: (input) =>
+          observeRpcEffect(WS_METHODS.workRecap, workRecap.recap(input), {
             "rpc.aggregate": "work",
           }),
         [WS_METHODS.workCalendarSet]: (input) =>
