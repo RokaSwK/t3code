@@ -66,3 +66,29 @@ export function pickForkDesktopAsset<T extends { readonly name: string }>(
   }
   return best;
 }
+
+/**
+ * Fork release bodies end with a changelog: this marker, then one `## <version>` section per
+ * build, newest first. The release workflow writes it (scripts/fork-release-notes.ts).
+ */
+export const FORK_CHANGELOG_MARKER = "<!-- fork-changelog -->";
+
+/** The changelog sections of builds newer than the running one, newest first. */
+export function parseForkReleaseChangelog(
+  body: string | null | undefined,
+  runningVersion: string,
+): Array<{ readonly version: string; readonly note: string }> {
+  const start = body?.indexOf(FORK_CHANGELOG_MARKER) ?? -1;
+  if (!body || start < 0) return [];
+  return body
+    .slice(start + FORK_CHANGELOG_MARKER.length)
+    .split(/^## /m)
+    .slice(1)
+    .flatMap((section) => {
+      const newline = section.indexOf("\n");
+      const version = (newline < 0 ? section : section.slice(0, newline)).trim();
+      return compareForkDesktopVersions(version, runningVersion) > 0
+        ? [{ version, note: newline < 0 ? "" : section.slice(newline + 1).trim() }]
+        : [];
+    });
+}

@@ -5,6 +5,8 @@ import {
   forkDesktopFeedUrl,
   forkDesktopReleaseApiUrl,
   forkDesktopReleaseTag,
+  FORK_CHANGELOG_MARKER,
+  parseForkReleaseChangelog,
   pickForkDesktopAsset,
 } from "./desktopReleaseChannels.ts";
 
@@ -65,5 +67,41 @@ describe("fork release assets", () => {
     expect(forkDesktopReleaseApiUrl("personal")).toBe(
       "https://api.github.com/repos/RokaSwK/t3code/releases/tags/desktop-personal",
     );
+  });
+});
+
+describe("fork release changelog", () => {
+  const body = [
+    "Version: `0.0.43-fork.personal.20260928120000`",
+    "",
+    "Apple Silicon build.",
+    "",
+    FORK_CHANGELOG_MARKER,
+    "## 0.0.43-fork.personal.20260928120000",
+    "- feat(work): recap by project — jaime (ours)",
+    "",
+    "## 0.0.42-fork.personal.20260927120000",
+    "- fix(web): sidebar — Julius (upstream)",
+    "",
+    "## 0.0.42-fork.personal.20260926120000",
+    "- chore: older",
+  ].join("\n");
+
+  it("returns the builds newer than the running one, newest first", () => {
+    expect(parseForkReleaseChangelog(body, "0.0.42-fork.personal.20260926120000")).toEqual([
+      {
+        version: "0.0.43-fork.personal.20260928120000",
+        note: "- feat(work): recap by project — jaime (ours)",
+      },
+      {
+        version: "0.0.42-fork.personal.20260927120000",
+        note: "- fix(web): sidebar — Julius (upstream)",
+      },
+    ]);
+  });
+
+  it("shows nothing from a body without a changelog", () => {
+    expect(parseForkReleaseChangelog("Version: `x`\n\nSource: `abc`", "0.0.1")).toEqual([]);
+    expect(parseForkReleaseChangelog(null, "0.0.1")).toEqual([]);
   });
 });

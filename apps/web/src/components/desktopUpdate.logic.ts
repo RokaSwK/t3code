@@ -1,4 +1,9 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import {
+  FORK_DESKTOP_REPOSITORY,
+  forkDesktopChannel,
+  forkDesktopReleaseTag,
+} from "@t3tools/shared/desktopReleaseChannels";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
@@ -14,15 +19,31 @@ export function getDesktopUpdateDownloadedVersion(state: DesktopUpdateState): st
   return state.downloadedVersion ?? state.availableVersion;
 }
 
-/** Release notes for an exact downloaded build; nightly suffixes are part of the tag. */
+/**
+ * Release notes for an exact downloaded build; nightly suffixes are part of the tag. Fork
+ * tracks publish into one moving release whose body holds every build's changes.
+ */
 export function getDesktopUpdateReleaseUrl(version: string | null): string | null {
   const normalizedVersion = version?.trim();
   if (!normalizedVersion) return null;
+  const fork = forkDesktopChannel(normalizedVersion);
+  if (fork) {
+    return `https://github.com/${FORK_DESKTOP_REPOSITORY}/releases/tag/${forkDesktopReleaseTag(fork)}`;
+  }
   return `${DESKTOP_RELEASE_TAG_URL}/v${encodeURIComponent(normalizedVersion)}`;
 }
 
-export function getDesktopUpdateReleaseHistoryUrl(): string {
-  return DESKTOP_RELEASE_HISTORY_URL;
+export function getDesktopUpdateReleaseHistoryUrl(version?: string | null): string {
+  return version && forkDesktopChannel(version)
+    ? `https://github.com/${FORK_DESKTOP_REPOSITORY}/releases`
+    : DESKTOP_RELEASE_HISTORY_URL;
+}
+
+/** Nightly and the personal fork track show what changed; stable keeps a plain tooltip. */
+export function desktopUpdateShowsReleaseNotes(state: DesktopUpdateState): boolean {
+  return (
+    (state.channel === "nightly" || state.channel === "personal") && state.releaseNotes.length > 0
+  );
 }
 
 export function resolveDesktopUpdateButtonAction(

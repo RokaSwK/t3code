@@ -192,6 +192,15 @@ describe("desktop update UI helpers", () => {
     );
   });
 
+  it("links fork builds to their track's release on the fork", () => {
+    expect(getDesktopUpdateReleaseUrl("0.0.43-fork.personal.20260928000000")).toBe(
+      "https://github.com/RokaSwK/t3code/releases/tag/desktop-personal",
+    );
+    expect(getDesktopUpdateReleaseHistoryUrl("0.0.43-fork.personal.20260928000000")).toBe(
+      "https://github.com/RokaSwK/t3code/releases",
+    );
+  });
+
   it("omits the release URL when the updater does not report a version", () => {
     expect(getDesktopUpdateReleaseUrl(null)).toBeNull();
     expect(getDesktopUpdateReleaseUrl("  ")).toBeNull();

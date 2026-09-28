@@ -20,6 +20,7 @@ import * as NodePath from "node:path";
 import {
   forkDesktopReleaseApiUrl,
   forkDesktopReleaseTag,
+  parseForkReleaseChangelog,
   pickForkDesktopAsset,
 } from "@t3tools/shared/desktopReleaseChannels";
 import { HostProcessArchitecture } from "@t3tools/shared/hostProcess";
@@ -100,7 +101,8 @@ export const make = Effect.gen(function* () {
     // A track's newest build is the target even when it is older than the running one, so
     // switching tracks works; the running build itself is never reinstalled.
     return {
-      notes: release.body ?? null,
+      // Every build since the running one, like electron-updater's full changelog on nightly.
+      notes: parseForkReleaseChangelog(release.body, appVersion),
       available:
         asset && asset.version !== appVersion ? { version: asset.version, asset } : undefined,
     };

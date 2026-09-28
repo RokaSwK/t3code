@@ -2,6 +2,7 @@ import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
 import { ExternalLinkIcon } from "lucide-react";
 
 import {
+  desktopUpdateShowsReleaseNotes,
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateReleaseUrl,
 } from "../desktopUpdate.logic";
@@ -52,7 +53,7 @@ export function SidebarUpdateReleaseNotes({
   readonly state: DesktopUpdateState;
   readonly tooltip: string;
 }) {
-  if (state.channel !== "nightly" || state.releaseNotes.length === 0) {
+  if (!desktopUpdateShowsReleaseNotes(state)) {
     return <>{tooltip}</>;
   }
 
@@ -109,7 +110,10 @@ export function SidebarUpdateReleaseNotes({
         {state.omittedReleaseCount > 0 ? (
           <div>
             <Separator className="my-3" />
-            <ReleaseLink releaseUrl={getDesktopUpdateReleaseHistoryUrl()} shell={shell}>
+            <ReleaseLink
+              releaseUrl={getDesktopUpdateReleaseHistoryUrl(state.availableVersion)}
+              shell={shell}
+            >
               {`${state.omittedReleaseCount} older ${state.omittedReleaseCount === 1 ? "release" : "releases"} on GitHub`}
             </ReleaseLink>
           </div>

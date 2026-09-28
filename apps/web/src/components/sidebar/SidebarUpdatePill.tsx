@@ -10,6 +10,7 @@ import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   canCheckForUpdate,
+  desktopUpdateShowsReleaseNotes,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
@@ -40,7 +41,7 @@ export function shouldUseSidebarUpdateReleaseNotesPopover(
   showUpdateDetails: boolean,
   state: DesktopUpdateState | null,
 ): boolean {
-  return showUpdateDetails && state?.channel === "nightly" && state.releaseNotes.length > 0;
+  return showUpdateDetails && state !== null && desktopUpdateShowsReleaseNotes(state);
 }
 
 export function handleSidebarUpdateReleaseNotesPopoverOpenChange(

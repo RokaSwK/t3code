@@ -10,7 +10,11 @@ The `Fork desktop releases` workflow builds Apple Silicon macOS archives from `r
 
 The `Fork upstream sync` workflow runs daily and on demand. It merges upstream's latest stable release into `release/stable` and the latest nightly into `release/nightly` and `personal`, runs focused checks, pushes, and dispatches the release build for each track that changed. A conflicting merge or failing checks opens an `Upstream merge needs attention` issue instead of pushing; resolve it by merging the tag locally and pushing, after which the next sync finds nothing to do. The issue title names the branch and tag, so re-runs do not duplicate it.
 
+Every Personal build also merges upstream's newest nightly first, so Personal never waits for the daily sync to stay current. The merge is pushed to `personal` after the build succeeds. If it conflicts or fails typechecks, the build goes out without it, its changelog says so, and the daily sync opens the issue.
+
 Each build uses `<base>-fork.<track>.<UTC timestamp>`, the same bundle ID, and the same app name. Release tags `desktop-stable`, `desktop-nightly`, and `desktop-personal` are the permanent download locations. Release notes record the exact source commit; those moving download pages are not immutable version tags.
+
+Release notes end with a changelog, one section per build, which the app shows when you hover an available update. Each line is a commit since the previous build, marked `ours` or `upstream` (reachable from upstream's `main` or tags) with its author. The section is computed from the `Source:` commit of the previous release body, so keep that line when editing a release by hand.
 
 ## Enable signed updates later
 
