@@ -41,8 +41,9 @@ into features under areas like Support or Mobile, so a PR, the thread that wrote
 request behind it sit together; expand a feature to see each item. Areas and features are ordered
 by size, biggest first: lines changed in your PRs (not tests, generated files, or lockfiles) and
 messages in the Slack conversation, so one large change ranks above many small ones. Chores fold
-into **Smaller things**. The **Text generation model** from **Settings → General** names the features and writes a
-short summary on top.
+into **Smaller things**. The **Text generation model** from **Settings → General** names the
+features and writes a short summary on top. The small numbers in the summary open the feature they
+refer to.
 
 Features are kept: new work joins the features it belongs to, so the recap reads the same each time
 you open it and the daily and weekly views agree. The first recap of a busy week takes a minute or

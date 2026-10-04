@@ -11,6 +11,8 @@ import { buildWorkGroups, workItemKeys, type WorkThread } from "./work.ts";
 import {
   buildWorkAccomplishments,
   buildWorkPlan,
+  parseRecapCitations,
+  splitRecapSummary,
   workRecapFeatureSize,
   workRecapItemSize,
   workSourceLines,
@@ -231,6 +233,41 @@ it("leaves out Slack posts that were only dismissed", () => {
       now,
     }),
   ).toEqual([]);
+});
+
+describe("recap citations", () => {
+  const refs = new Map([
+    ["F1", { kind: "feature" as const, id: "f12" }],
+    ["F2", { kind: "feature" as const, id: "f7" }],
+    ["I1", { kind: "item" as const, id: "pr:github.com/acme/app#42" }],
+  ]);
+
+  it("strips every id and keeps only the ones the prompt gave out", () => {
+    const parsed = parseRecapCitations(
+      " I shipped card freezing [F1] and refund emails [f2, F9]. Also [I1][W0] a fix [F44].",
+      refs,
+    );
+    expect(parsed.text).toBe("I shipped card freezing and refund emails. Also a fix.");
+    expect(parsed.citations).toEqual([
+      { at: "I shipped card freezing".length, kind: "feature", id: "f12" },
+      { at: "I shipped card freezing and refund emails".length, kind: "feature", id: "f7" },
+      {
+        at: "I shipped card freezing and refund emails. Also".length,
+        kind: "item",
+        id: refs.get("I1")!.id,
+      },
+    ]);
+  });
+
+  it("splits text into runs that each end where citations go", () => {
+    const { text, citations } = parseRecapCitations("Card freezing [F1, F2] shipped.", refs);
+    expect(splitRecapSummary(text, citations)).toEqual([
+      { text: "Card freezing", citations: [citations[0], citations[1]] },
+      { text: " shipped.", citations: [] },
+    ]);
+    // Summaries written before citations render as one plain run.
+    expect(splitRecapSummary("Old summary.")).toEqual([{ text: "Old summary.", citations: [] }]);
+  });
 });
 
 describe("work size", () => {

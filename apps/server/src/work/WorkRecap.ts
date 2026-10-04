@@ -11,6 +11,7 @@
  */
 import {
   type ModelSelection,
+  WorkRecapCitation,
   WorkRecapError,
   type WorkRecapFeature,
   type WorkRecapInput,
@@ -27,6 +28,7 @@ import {
 import {
   buildWorkAccomplishments,
   buildWorkPlan,
+  parseRecapCitations,
   recapWaitingGroups,
 } from "@t3tools/shared/workRecap";
 import * as Context from "effect/Context";
@@ -73,7 +75,12 @@ const Store = Schema.Struct({
   ),
   waitingTitles: Schema.Array(Schema.Struct({ groupId: Schema.String, title: Schema.String })),
   summaries: Schema.Array(
-    Schema.Struct({ key: Schema.String, text: Schema.String, model: Schema.String }),
+    Schema.Struct({
+      key: Schema.String,
+      text: Schema.String,
+      model: Schema.String,
+      citations: Schema.optional(Schema.Array(WorkRecapCitation)),
+    }),
   ),
 });
 type Store = typeof Store.Type;
@@ -179,7 +186,13 @@ export function buildRecapView(
     features,
     unassigned,
     waitingTitles,
-    summary: summary ? { text: summary.text, model: summary.model } : null,
+    summary: summary
+      ? {
+          text: summary.text,
+          model: summary.model,
+          ...(summary.citations ? { citations: summary.citations } : {}),
+        }
+      : null,
     stale: unassigned.length > 0 || !summary || waitingTitles.length < gathered.waiting.length,
   };
 }
@@ -506,7 +519,7 @@ export const make = Effect.gen(function* () {
           const untitled = gathered.waiting.filter((group) => !titled.has(group.id));
           const hasSummary = store.summaries.some((entry) => entry.key === summaryKey);
           if (!hasSummary || untitled.length > 0 || input.regroup) {
-            const { prompt, outputSchema } = buildSummaryPrompt({
+            const { prompt, outputSchema, refs } = buildSummaryPrompt({
               mode: input.mode,
               period: input.period,
               view: buildRecapView(store, gathered, summaryKey),
@@ -525,6 +538,7 @@ export const make = Effect.gen(function* () {
               const title = entry.title.trim();
               return group && title && !titled.has(group.id) ? [{ groupId: group.id, title }] : [];
             });
+            const summary = parseRecapCitations(result.summary, refs);
             store = {
               ...store,
               waitingTitles: [...store.waitingTitles, ...waitingTitles],
@@ -532,8 +546,9 @@ export const make = Effect.gen(function* () {
                 ...store.summaries.filter((entry) => entry.key !== summaryKey),
                 {
                   key: summaryKey,
-                  text: result.summary.trim(),
+                  text: summary.text,
                   model: gathered.modelSelection.model,
+                  citations: summary.citations,
                 },
               ],
             };

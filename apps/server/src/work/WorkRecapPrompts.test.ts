@@ -29,10 +29,10 @@ const summaryPrompt = (view: WorkRecapView) =>
     planned: [],
     meetings: [],
     waiting: [],
-  }).prompt;
+  });
 
 it("lists areas and features biggest first, not by how many items they hold", () => {
-  const prompt = summaryPrompt({
+  const { prompt, refs } = summaryPrompt({
     items: [
       item("a", "Copy fix", 4),
       item("b", "Label fix", 6),
@@ -54,5 +54,25 @@ it("lists areas and features biggest first, not by how many items they hold", ()
     prompt.indexOf(line),
   );
   expect(order).toEqual(order.toSorted((a, b) => a - b));
-  expect(prompt).toContain("Card freezing (1 items, 1400 source lines)");
+  expect(prompt).toContain("- [F1] Card freezing (1 items, 1400 source lines)");
+  // Short ids in list order map back to the features they name.
+  expect([...refs]).toEqual([
+    ["F1", { kind: "feature", id: "f3" }],
+    ["F2", { kind: "feature", id: "f2" }],
+    ["F3", { kind: "feature", id: "f1" }],
+  ]);
+});
+
+it("gives work that is not grouped yet its own ids", () => {
+  const { prompt, refs } = summaryPrompt({
+    items: [item("a", "Copy fix"), item("b", "Card freezing", 900)],
+    features: [],
+    unassigned: ["a", "b"],
+    waitingTitles: [],
+    summary: null,
+    stale: true,
+  });
+  expect(prompt).toContain("- [I1] Card freezing");
+  expect(prompt).toContain("- [I2] Copy fix");
+  expect(refs.get("I1")).toEqual({ kind: "item", id: "b" });
 });

@@ -13,6 +13,7 @@ import type {
   ThreadPullRequestSnapshot,
   WorkGitHubPullRequest,
   WorkItemMark,
+  WorkRecapCitation,
 } from "@t3tools/contracts";
 
 import { legacyThreadPullRequestKey, threadPullRequestKeyOf } from "./threadPullRequests.ts";
@@ -385,3 +386,56 @@ export function recapWaitingGroups(
 }
 
 const RECAP_WAITING_WINDOW_MS = 7 * 86_400_000;
+
+const CITATION = /[ \t]*\[\s*([FIW]\d+(?:\s*[,;]\s*[FIW]\d+)*)\s*\]/gi;
+
+/**
+ * Reads a summary the model wrote with ids like [F3] after the words they support, and returns
+ * the plain text with every id removed, plus where each id the prompt gave out was cited. Ids
+ * that were never given out are dropped, so a summary never links to made-up work.
+ */
+export function parseRecapCitations(
+  written: string,
+  refs: ReadonlyMap<string, Pick<WorkRecapCitation, "kind" | "id">>,
+): { readonly text: string; readonly citations: ReadonlyArray<WorkRecapCitation> } {
+  let text = "";
+  let last = 0;
+  const citations: WorkRecapCitation[] = [];
+  for (const match of written.matchAll(CITATION)) {
+    text += written.slice(last, match.index);
+    last = match.index + match[0].length;
+    for (const id of match[1]!.split(/[,;]/)) {
+      const ref = refs.get(id.trim().toUpperCase());
+      if (ref && !citations.some((known) => known.at === text.length && known.id === ref.id))
+        citations.push({ at: text.length, ...ref });
+    }
+  }
+  text += written.slice(last);
+  const lead = text.length - text.trimStart().length;
+  const trimmed = text.trim();
+  return {
+    text: trimmed,
+    citations: citations.map((citation) => ({
+      ...citation,
+      at: Math.min(Math.max(citation.at - lead, 0), trimmed.length),
+    })),
+  };
+}
+
+/** The summary as runs of text, each followed by the citations right after it. */
+export function splitRecapSummary(
+  text: string,
+  citations: ReadonlyArray<WorkRecapCitation> = [],
+): Array<{ readonly text: string; readonly citations: ReadonlyArray<WorkRecapCitation> }> {
+  const runs: Array<{ text: string; citations: WorkRecapCitation[] }> = [];
+  let last = 0;
+  for (const citation of [...citations].sort((a, b) => a.at - b.at)) {
+    const at = Math.min(Math.max(citation.at, last), text.length);
+    const previous = runs.at(-1);
+    if (previous && at === last) previous.citations.push(citation);
+    else runs.push({ text: text.slice(last, at), citations: [citation] });
+    last = at;
+  }
+  if (last < text.length || runs.length === 0) runs.push({ text: text.slice(last), citations: [] });
+  return runs;
+}

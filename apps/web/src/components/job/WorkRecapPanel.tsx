@@ -1,8 +1,16 @@
-import { type ComponentProps, type ReactNode, useCallback, useEffect, useState } from "react";
+import {
+  type ComponentProps,
+  Fragment,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import type {
   EnvironmentId,
   WorkCalendarEvent,
   WorkItemMark,
+  WorkRecapCitation,
   WorkRecapInput,
   WorkRecapItem,
   WorkRecapView,
@@ -10,6 +18,7 @@ import type {
 import {
   buildWorkPlan,
   recapWaitingGroups,
+  splitRecapSummary,
   workGroupTitle,
   workRecapFeatureSize,
 } from "@t3tools/shared/workRecap";
@@ -44,6 +53,7 @@ import {
 } from "../ui/dialog";
 import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useWorkCalendar } from "./WorkCalendar";
 import { workItemKeys, workMatchesMarks, type WorkGroup } from "./workGroups";
 import {
@@ -60,12 +70,18 @@ type RecapMode = "daily" | "weekly";
 
 /** A feature card: the server's feature, or the work it has not grouped yet. */
 interface RecapClusterView {
+  /** Stable across renders: the feature id, "minor", or "unassigned". */
+  readonly key: string;
+  /** The features the card shows, for finding the card a citation points at. */
+  readonly featureIds: ReadonlyArray<string>;
   readonly title: string;
   readonly description: string | null;
   readonly items: ReadonlyArray<WorkRecapItem>;
   readonly area: string | null;
   readonly minor: boolean;
 }
+
+const recapClusterDomId = (key: string) => `work-recap-${key.replace(/[^\w-]/g, "_")}`;
 
 /** Biggest feature first; the size of an area is the size of all its items together. */
 function bySize(clusters: ReadonlyArray<RecapClusterView>) {
@@ -154,9 +170,13 @@ function useWorkRecap(
 function RecapSummaryCard({
   environmentId,
   recap,
+  clusterFor,
+  onShow,
 }: {
   readonly environmentId: EnvironmentId | null;
   readonly recap: ReturnType<typeof useWorkRecap>;
+  readonly clusterFor: (citation: WorkRecapCitation) => RecapClusterView | undefined;
+  readonly onShow: (cluster: RecapClusterView) => void;
 }) {
   const summary = recap.view?.summary ?? null;
   const loading = environmentId !== null && !summary && !recap.failed;
@@ -191,10 +211,70 @@ function RecapSummaryCard({
             <Skeleton className="h-3.5 w-2/3" />
           </div>
         ) : summary ? (
-          <p className="whitespace-pre-line">{summary.text}</p>
+          <CitedSummary
+            text={summary.text}
+            citations={summary.citations ?? []}
+            clusterFor={clusterFor}
+            onShow={onShow}
+          />
         ) : null}
       </div>
     </section>
+  );
+}
+
+/**
+ * The summary with each citation as a small numbered link to the card it is about, numbered in
+ * the order cards are first cited. Citations of work no longer on screen are left out.
+ */
+function CitedSummary({
+  text,
+  citations,
+  clusterFor,
+  onShow,
+}: {
+  readonly text: string;
+  readonly citations: ReadonlyArray<WorkRecapCitation>;
+  readonly clusterFor: (citation: WorkRecapCitation) => RecapClusterView | undefined;
+  readonly onShow: (cluster: RecapClusterView) => void;
+}) {
+  const numbers = new Map<string, number>();
+  return (
+    <p className="whitespace-pre-line">
+      {splitRecapSummary(text, citations).map((run) => (
+        <Fragment key={run.citations[0]?.at ?? "end"}>
+          {run.text}
+          {[
+            ...new Map(
+              run.citations.flatMap((citation) => {
+                const cluster = clusterFor(citation);
+                return cluster ? [[cluster.key, cluster] as const] : [];
+              }),
+            ).values(),
+          ].map((cluster) => {
+            const number = numbers.get(cluster.key) ?? numbers.size + 1;
+            numbers.set(cluster.key, number);
+            return (
+              <Tooltip key={cluster.key}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={`Show ${cluster.title}`}
+                      className="ml-0.5 cursor-pointer align-super text-2xs tabular-nums text-primary hover:underline focus-visible:underline focus-visible:outline-none"
+                      onClick={() => onShow(cluster)}
+                    />
+                  }
+                >
+                  {number}
+                </TooltipTrigger>
+                <TooltipPopup side="top">{cluster.title}</TooltipPopup>
+              </Tooltip>
+            );
+          })}
+        </Fragment>
+      ))}
+    </p>
   );
 }
 
@@ -239,10 +319,14 @@ function ClusterSources({ items }: { readonly items: ReadonlyArray<WorkRecapItem
 function RecapCluster({
   cluster,
   highlights,
+  open,
+  onOpenChange,
   renderRow,
 }: {
   readonly cluster: RecapClusterView;
   readonly highlights: ReadonlyArray<WorkItemMark> | null;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
   readonly renderRow: (item: WorkRecapItem, compact: boolean) => ReactNode;
 }) {
   const repositories = new Set(
@@ -253,8 +337,8 @@ function RecapCluster({
     ? cluster.items.filter((item) => workMatchesMarks(item.keys, highlights)).length
     : 0;
   return (
-    <div className="rounded-lg border">
-      <Collapsible>
+    <div id={recapClusterDomId(cluster.key)} className="scroll-mt-2 rounded-lg border">
+      <Collapsible open={open} onOpenChange={onOpenChange}>
         <CollapsibleTrigger className="group flex w-full items-start gap-2 rounded-lg px-3 py-2.5 text-left hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
           <ChevronRightIcon
             aria-hidden
@@ -431,6 +515,8 @@ export function WorkRecapPanel({
   const itemsByKey = new Map(items.map((item) => [item.keys[0]!, item]));
   const clusters: RecapClusterView[] = [
     ...(view?.features ?? []).map((feature) => ({
+      key: feature.id,
+      featureIds: [feature.id],
       title: feature.title,
       description: feature.description || null,
       items: feature.items.flatMap((key) => itemsByKey.get(key) ?? []),
@@ -440,6 +526,8 @@ export function WorkRecapPanel({
     ...(view && view.unassigned.length > 0
       ? [
           {
+            key: "unassigned",
+            featureIds: [],
             title: recap.writing ? "Grouping new work…" : "Not grouped yet",
             description: null,
             items: view.unassigned.flatMap((key) => itemsByKey.get(key) ?? []),
@@ -493,6 +581,8 @@ export function WorkRecapPanel({
   const smallerThings: RecapClusterView | null =
     minorClusters.length > 0
       ? {
+          key: "minor",
+          featureIds: minorClusters.flatMap((cluster) => cluster.featureIds),
           title: "Smaller things",
           description: minorClusters.map((cluster) => cluster.title).join(" · "),
           items: minorClusters.flatMap((cluster) => cluster.items),
@@ -500,6 +590,30 @@ export function WorkRecapPanel({
           minor: true,
         }
       : null;
+  const shownClusters = [
+    ...areaSections.flatMap((section) => section.clusters),
+    ...(smallerThings ? [smallerThings] : []),
+  ];
+  const clusterFor = (citation: WorkRecapCitation) =>
+    shownClusters.find((cluster) =>
+      citation.kind === "feature"
+        ? cluster.featureIds.includes(citation.id)
+        : cluster.items.some((item) => item.keys[0] === citation.id),
+    );
+  const [openClusters, setOpenClusters] = useState<ReadonlySet<string>>(() => new Set());
+  const setClusterOpen = (key: string, open: boolean) =>
+    setOpenClusters((current) => {
+      const next = new Set(current);
+      if (open) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  const showCluster = (cluster: RecapClusterView) => {
+    setClusterOpen(cluster.key, true);
+    document
+      .getElementById(recapClusterDomId(cluster.key))
+      ?.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
 
   const planned = buildWorkPlan(
     settings.workDayPlan?.date === date ? settings.workDayPlan.items : [],
@@ -586,7 +700,12 @@ export function WorkRecapPanel({
         </Button>
       </div>
 
-      <RecapSummaryCard environmentId={environmentId} recap={recap} />
+      <RecapSummaryCard
+        environmentId={environmentId}
+        recap={recap}
+        clusterFor={clusterFor}
+        onShow={showCluster}
+      />
 
       <div className="-mx-3 space-y-4">
         <div className="space-y-1">
@@ -624,9 +743,11 @@ export function WorkRecapPanel({
                 ) : null}
                 {section.clusters.map((cluster) => (
                   <RecapCluster
-                    key={`${cluster.title}:${cluster.items[0]?.keys[0] ?? ""}`}
+                    key={cluster.key}
                     cluster={cluster}
                     highlights={mode === "weekly" ? highlights : null}
+                    open={openClusters.has(cluster.key)}
+                    onOpenChange={(open) => setClusterOpen(cluster.key, open)}
                     renderRow={renderRow}
                   />
                 ))}
@@ -636,6 +757,8 @@ export function WorkRecapPanel({
               <RecapCluster
                 cluster={smallerThings}
                 highlights={mode === "weekly" ? highlights : null}
+                open={openClusters.has(smallerThings.key)}
+                onOpenChange={(open) => setClusterOpen(smallerThings.key, open)}
                 renderRow={renderRow}
               />
             ) : null}

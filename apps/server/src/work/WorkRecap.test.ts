@@ -45,6 +45,7 @@ function fakeModel(
   options: {
     readonly assign?: (prompt: string) => unknown;
     readonly plan?: ReadonlyArray<unknown>;
+    readonly summary?: string;
   } = {},
 ) {
   const prompts: string[] = [];
@@ -54,7 +55,10 @@ function fakeModel(
       return Effect.succeed({ features: options.plan ?? [] });
     }
     if (!input.prompt.includes("Return a JSON object with key: groups.")) {
-      return Effect.succeed({ summary: "I shipped refunds.", waitingTitles: [] });
+      return Effect.succeed({
+        summary: options.summary ?? "I shipped refunds.",
+        waitingTitles: [],
+      });
     }
     if (options.assign) return Effect.succeed(options.assign(input.prompt));
     const items = [...input.prompt.matchAll(/^- (i\d+): /gm)].map((match) => match[1]!);
@@ -158,6 +162,23 @@ it.layer(NodeServices.layer)("work recap", (it) => {
         const again = yield* restarted.recap(INPUT);
         expect(again.features[0]!.items).toHaveLength(3);
         expect(model.prompts).toHaveLength(promptsBefore);
+      }).pipe(Effect.provide(dependencies(slack, model)));
+    }),
+  );
+
+  it.effect("keeps the summary's citations of real features and drops made-up ones", () =>
+    Effect.gen(function* () {
+      const slack = { mergedPullRequests: [merged(1, "Ship refunds")] };
+      const model = fakeModel({ summary: "I shipped refunds [F1] and payroll [F7]." });
+      yield* Effect.gen(function* () {
+        const view = yield* (yield* WorkRecap.make).recap(INPUT);
+        expect(view.summary).toMatchObject({
+          text: "I shipped refunds and payroll.",
+          citations: [{ at: "I shipped refunds".length, kind: "feature", id: "f1" }],
+        });
+        // A restart reads the cached summary with its citations.
+        const again = yield* (yield* WorkRecap.make).recap({ ...INPUT, write: false });
+        expect(again.summary).toEqual(view.summary);
       }).pipe(Effect.provide(dependencies(slack, model)));
     }),
   );

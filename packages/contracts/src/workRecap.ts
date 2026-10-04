@@ -69,6 +69,18 @@ export const WorkRecapFeature = Schema.Struct({
 });
 export type WorkRecapFeature = typeof WorkRecapFeature.Type;
 
+/**
+ * A feature or a not yet grouped item the summary mentions, cited at `at`: the character offset
+ * in the summary's text right after the words about it.
+ */
+export const WorkRecapCitation = Schema.Struct({
+  at: Schema.Number,
+  kind: Schema.Literals(["feature", "item"]),
+  /** A feature id, or an item's first key. */
+  id: Schema.String,
+});
+export type WorkRecapCitation = typeof WorkRecapCitation.Type;
+
 export const WorkRecapView = Schema.Struct({
   items: Schema.Array(WorkRecapItem),
   features: Schema.Array(WorkRecapFeature),
@@ -76,7 +88,15 @@ export const WorkRecapView = Schema.Struct({
   unassigned: Schema.Array(Schema.String),
   /** Short names for Work groups that wait on someone, by group id. */
   waitingTitles: Schema.Array(Schema.Struct({ groupId: Schema.String, title: Schema.String })),
-  summary: Schema.NullOr(Schema.Struct({ text: Schema.String, model: Schema.String })),
+  summary: Schema.NullOr(
+    Schema.Struct({
+      /** Plain text, ready to copy or read out. */
+      text: Schema.String,
+      model: Schema.String,
+      /** Where the summary cites work; summaries written before citations have none. */
+      citations: Schema.optional(Schema.Array(WorkRecapCitation)),
+    }),
+  ),
   /** Something is missing that a write would fill in: new work, a summary, or a title. */
   stale: Schema.Boolean,
 });
