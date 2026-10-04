@@ -11,6 +11,7 @@ import type {
   SlackState,
   SlackThread,
   ThreadPullRequestSnapshot,
+  WorkGitHubPullRequest,
   WorkItemMark,
 } from "@t3tools/contracts";
 
@@ -45,10 +46,88 @@ export interface WorkAccomplishment {
   };
   /** The PR's head branch; items on one branch are one feature. */
   readonly branch?: string;
+  /** Source lines across the item's known pull requests; see {@link workSourceLines}. */
+  readonly sourceLines?: number;
+  /** Replies in the item's Slack conversation. */
+  readonly slackMessages?: number;
+}
+
+/** A candidate with its pull requests' source lines by URL, so merged duplicates sum once. */
+type Candidate = WorkAccomplishment & { readonly lines?: Readonly<Record<string, number>> };
+
+// Changed lines that show effort: tests, generated output, lockfiles, snapshots, and vendored
+// code don't.
+const NON_SOURCE_PATHS = [
+  /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Gemfile\.lock|Podfile\.lock|Cargo\.lock|composer\.lock|poetry\.lock|uv\.lock|go\.sum)$/,
+  /(^|\/)(__generated__|generated|__snapshots__)\/|\.(snap|min\.js|min\.css|generated\.\w+)$/,
+  /(^|\/)(\.repos|vendor|vendored|third_party|third-party|node_modules)\//,
+  /(^|\/)(spec|specs|test|tests|__tests__|__mocks__|e2e|cypress|playwright)\//,
+  /(\.|_)(spec|test)\.\w+$|(^|\/)test_[^/]+\.py$|_test\.go$/,
+];
+
+/** Lines a pull request changed in source files, from GitHub's per-file counts. */
+export function workSourceLines(
+  files: ReadonlyArray<{
+    readonly path: string;
+    readonly additions: number;
+    readonly deletions: number;
+  }>,
+): number {
+  return files
+    .filter((file) => !NON_SOURCE_PATHS.some((rule) => rule.test(file.path)))
+    .reduce((total, file) => total + file.additions + file.deletions, 0);
+}
+
+/** What a piece of work's size is measured from. */
+interface WorkSizeFacts {
+  readonly sourceLines?: number | undefined;
+  readonly slackMessages?: number | undefined;
+}
+
+/**
+ * How big a piece of finished work is, with diminishing returns: the thousandth line or the
+ * tenth Slack message adds less than the first ones. Work with no known size is 1.
+ */
+export function workRecapItemSize(item: WorkSizeFacts): number {
+  return (
+    1 + Math.log2(1 + (item.sourceLines ?? 0) / 25) + Math.log2(1 + (item.slackMessages ?? 0) / 2)
+  );
+}
+
+/** A feature led by its biggest item: many small items don't outweigh one big one. */
+export function workRecapFeatureSize(items: ReadonlyArray<WorkSizeFacts>): number {
+  return Math.hypot(...items.map(workRecapItemSize));
 }
 
 function channelOf(thread: SlackThread) {
   return { channel: { name: thread.channelName, kind: thread.channelKind } };
+}
+
+/** The known source lines of these pull requests, by URL. */
+function linesOf(
+  urls: ReadonlyArray<string>,
+  known: ReadonlyMap<string, WorkGitHubPullRequest>,
+): { readonly lines?: Record<string, number> } {
+  const lines: Record<string, number> = {};
+  for (const url of urls) {
+    const sourceLines = known.get(url)?.sourceLines;
+    if (sourceLines !== undefined) lines[url] = sourceLines;
+  }
+  return Object.keys(lines).length > 0 ? { lines } : {};
+}
+
+function groupSize(group: WorkGroup, known: ReadonlyMap<string, WorkGitHubPullRequest>) {
+  return {
+    ...linesOf(
+      [
+        ...group.pullRequests.map((request) => request.url),
+        ...(group.conversation?.pullRequests ?? []).map((request) => request.url),
+        ...(group.pullRequest ? [group.pullRequest.url] : []),
+      ],
+      known,
+    ),
+    ...(group.conversation?.replyCount ? { slackMessages: group.conversation.replyCount } : {}),
+  };
 }
 
 /**
@@ -75,7 +154,12 @@ export function buildWorkAccomplishments(input: {
   readonly since: number;
   readonly now: number;
 }): WorkAccomplishment[] {
-  const candidates: WorkAccomplishment[] = [];
+  const candidates: Candidate[] = [];
+  const known = new Map(
+    [...(input.slack?.authoredPullRequests ?? []), ...(input.slack?.mergedPullRequests ?? [])].map(
+      (request) => [request.url, request] as const,
+    ),
+  );
   const ignoredKeys = new Set(input.ignored.flatMap((item) => item.keys));
   for (const group of input.groups) {
     const keys = workItemKeys(group);
@@ -103,6 +187,7 @@ export function buildWorkAccomplishments(input: {
         evidence: "Marked done",
         groupId: group.id,
         source: "slack",
+        ...groupSize(group, known),
         ...(group.conversation
           ? { url: group.conversation.permalink, ...channelOf(group.conversation) }
           : {}),
@@ -124,6 +209,7 @@ export function buildWorkAccomplishments(input: {
           isDraft: false,
         },
         branch: request.snapshot.headBranch,
+        ...groupSize(group, known),
         ...project,
       });
     }
@@ -142,6 +228,7 @@ export function buildWorkAccomplishments(input: {
         evidence: "Marked done",
         url: thread.permalink,
         source: "slack",
+        ...(thread.replyCount ? { slackMessages: thread.replyCount } : {}),
         ...channelOf(thread),
       });
   }
@@ -168,7 +255,12 @@ export function buildWorkAccomplishments(input: {
       at: Date.parse(thread.settledAt),
       evidence: "Thread settled",
       source: "t3",
-      ...(group ? { groupId: group.id } : {}),
+      ...(group
+        ? { groupId: group.id, ...groupSize(group, known) }
+        : linesOf(
+            thread.pullRequests.map((request) => request.url),
+            known,
+          )),
       ...(link?.snapshot
         ? {
             pullRequest: {
@@ -199,9 +291,10 @@ export function buildWorkAccomplishments(input: {
         state: "merged",
         isDraft: false,
       },
+      ...linesOf([request.url], known),
     });
   }
-  const result: WorkAccomplishment[] = [];
+  const result: Candidate[] = [];
   for (const item of [...candidates].sort((a, b) => b.at - a.at)) {
     if (
       !Number.isFinite(item.at) ||
@@ -219,19 +312,29 @@ export function buildWorkAccomplishments(input: {
       const pullRequest = all.find((known) => known.pullRequest)?.pullRequest;
       const url = all.find((known) => known.url)?.url;
       const branch = all.find((known) => known.branch)?.branch;
+      const lines = Object.assign({}, ...all.map((known) => known.lines ?? {}));
+      const slackMessages = Math.max(0, ...all.map((known) => known.slackMessages ?? 0));
       const merged = {
         ...newest,
         ...(project ? { project } : {}),
         ...(pullRequest ? { pullRequest } : {}),
         ...(url ? { url } : {}),
         ...(branch ? { branch } : {}),
+        ...(Object.keys(lines).length > 0 ? { lines } : {}),
+        ...(slackMessages > 0 ? { slackMessages } : {}),
         keys: [...new Set([...item.keys, ...matches.flatMap((known) => known.keys)])],
       };
       for (const match of matches) result.splice(result.indexOf(match), 1);
       result.push(merged);
     }
   }
-  return result.sort((a, b) => b.at - a.at);
+  return result
+    .sort((a, b) => b.at - a.at)
+    .map(({ lines, ...item }) =>
+      lines
+        ? { ...item, sourceLines: Object.values(lines).reduce((sum, count) => sum + count, 0) }
+        : item,
+    );
 }
 
 function projectOf(thread: WorkThread | undefined) {

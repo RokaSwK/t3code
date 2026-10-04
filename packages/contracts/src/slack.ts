@@ -183,6 +183,8 @@ export const WorkGitHubPullRequest = Schema.Struct({
   review: Schema.optional(Schema.Literals(["approved", "changes-requested", "review-required"])),
   checks: Schema.optional(Schema.Literals(["passing", "failing", "pending"])),
   conflicting: Schema.optional(Schema.Boolean),
+  /** Changed lines outside tests, generated files, lockfiles, and vendored code. */
+  sourceLines: Schema.optional(Schema.Number),
 });
 export type WorkGitHubPullRequest = typeof WorkGitHubPullRequest.Type;
 

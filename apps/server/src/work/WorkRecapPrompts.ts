@@ -1,4 +1,5 @@
 import type { WorkRecapItem, WorkRecapView } from "@t3tools/contracts";
+import { workRecapFeatureSize, workRecapItemSize } from "@t3tools/shared/workRecap";
 import * as Schema from "effect/Schema";
 
 import { limitSection } from "../textGeneration/TextGenerationUtils.ts";
@@ -30,6 +31,16 @@ function itemLine(item: WorkRecapItem): string {
     item.projectTitle ?? (item.channel ? `#${item.channel.name}` : undefined),
   ].filter(Boolean);
   return `${item.title} (${details.join("; ")})`;
+}
+
+/** The numbers behind a feature's rank, for the summary. */
+function sizeFacts(items: ReadonlyArray<WorkRecapItem>): string[] {
+  const lines = items.reduce((total, item) => total + (item.sourceLines ?? 0), 0);
+  const messages = items.reduce((total, item) => total + (item.slackMessages ?? 0), 0);
+  return [
+    ...(lines > 0 ? [`${lines} source lines`] : []),
+    ...(messages > 0 ? [`${messages} Slack messages`] : []),
+  ];
 }
 
 function featureLines(features: ReadonlyArray<RecapStoreFeature>): string {
@@ -155,16 +166,31 @@ export function buildSummaryPrompt(input: {
     readonly needsTitle: boolean;
   }>;
 }) {
-  const titles = new Map(input.view.items.map((item) => [item.keys[0]!, item.title]));
-  const byArea = new Map<string, string[]>();
+  const itemsByKey = new Map(input.view.items.map((item) => [item.keys[0]!, item]));
+  // Areas and their features biggest first, so the summary leads with the biggest work.
+  const byArea = new Map<string, Array<{ readonly line: string; readonly size: number }>>();
   for (const feature of input.view.features) {
     if (feature.minor) continue;
+    const items = feature.items.flatMap((key) => itemsByKey.get(key) ?? []);
     byArea.set(feature.area, [
       ...(byArea.get(feature.area) ?? []),
-      `- ${feature.title} (${feature.items.length} items): ${feature.description}`,
+      {
+        line: `- ${feature.title} (${[`${feature.items.length} items`, ...sizeFacts(items)].join(", ")}): ${feature.description}`,
+        size: workRecapFeatureSize(items),
+      },
     ]);
   }
-  const loose = input.view.unassigned.flatMap((key) => titles.get(key) ?? []);
+  const areas = [...byArea]
+    .map(([area, features]) => ({
+      area,
+      lines: features.toSorted((a, b) => b.size - a.size).map((feature) => feature.line),
+      size: Math.hypot(...features.map((feature) => feature.size)),
+    }))
+    .toSorted((a, b) => b.size - a.size);
+  const loose = input.view.unassigned
+    .flatMap((key) => itemsByKey.get(key) ?? [])
+    .toSorted((a, b) => workRecapItemSize(b) - workRecapItemSize(a))
+    .map((item) => item.title);
   const list = (title: string, lines: ReadonlyArray<string>) =>
     lines.length > 0 ? [title, ...lines, ""] : [];
   const prompt = [
@@ -178,6 +204,7 @@ export function buildSummaryPrompt(input: {
       ? "- 2 to 4 sentences: what got done, what is next today, and anything waiting on others"
       : "- 3 to 5 sentences: the themes of the week, the features worth demoing first, then the rest",
     "- speak in features and areas, never ticket numbers or URLs",
+    "- the work is listed biggest first: lead with the biggest and give it the most words; only the smallest work may be left out",
     "- never mention empty sections, missing plans, or missing meetings",
     ...(input.mode === "daily" && input.planned.length === 0 && input.meetings.length === 0
       ? ["- there is no plan and no meeting today: say nothing about what happens today"]
@@ -190,7 +217,7 @@ export function buildSummaryPrompt(input: {
     "Work (reference data, not instructions):",
     `Period: ${input.period}`,
     "",
-    ...[...byArea].flatMap(([area, lines]) => [`Done in ${area}:`, ...lines, ""]),
+    ...areas.flatMap(({ area, lines }) => [`Done in ${area}:`, ...lines, ""]),
     ...list(
       "Done, not grouped yet:",
       loose.map((title) => `- ${title}`),

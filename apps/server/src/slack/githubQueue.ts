@@ -4,22 +4,27 @@
  * through the `gh` CLI, so it covers every repository the signed-in account can see.
  */
 import type { WorkGitHubPullRequest } from "@t3tools/contracts";
+import { workSourceLines } from "@t3tools/shared/workRecap";
 
 /** The queue is read this often; it combines the active queue and recent merges in one request. */
 export const GITHUB_QUEUE_INTERVAL_MS = 5 * 60_000;
 const QUEUE_SIZE = 50;
 
-const PULL_REQUEST_FIELDS = `... on PullRequest {
+/**
+ * Your own pull requests also read per-file line counts (the first 100 files), which the
+ * server reduces to `sourceLines` for the recap's size; the file list never leaves the server.
+ */
+const pullRequestFields = (files: boolean) => `... on PullRequest {
   url title number isDraft updatedAt mergedAt reviewDecision mergeable
   repository { nameWithOwner }
   author { login avatarUrl }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }${files ? "\n  files(first: 100) { nodes { path additions deletions } }" : ""}
 }`;
 
 export const githubQueueQuery = (since: string) => `query {
-  reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${PULL_REQUEST_FIELDS} } }
-  authored: search(query: "is:pr is:open archived:false author:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${PULL_REQUEST_FIELDS} } }
-  merged: search(query: "is:pr is:merged archived:false author:@me merged:>=${since} sort:updated-desc", type: ISSUE, first: 100) { nodes { ${PULL_REQUEST_FIELDS} } }
+  reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${pullRequestFields(false)} } }
+  authored: search(query: "is:pr is:open archived:false author:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${pullRequestFields(true)} } }
+  merged: search(query: "is:pr is:merged archived:false author:@me merged:>=${since} sort:updated-desc", type: ISSUE, first: 100) { nodes { ${pullRequestFields(true)} } }
 }`;
 
 interface RawPullRequest {
@@ -38,6 +43,13 @@ interface RawPullRequest {
       readonly commit?: { readonly statusCheckRollup?: { readonly state?: unknown } | null };
     } | null>;
   } | null;
+  readonly files?: {
+    readonly nodes?: ReadonlyArray<{
+      readonly path?: unknown;
+      readonly additions?: unknown;
+      readonly deletions?: unknown;
+    } | null>;
+  } | null;
 }
 
 function pullRequestOf(raw: RawPullRequest | null | undefined): WorkGitHubPullRequest | null {
@@ -47,6 +59,14 @@ function pullRequestOf(raw: RawPullRequest | null | undefined): WorkGitHubPullRe
   const checks = raw.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
   const review = raw.reviewDecision;
   const author = raw.author;
+  const files = raw.files?.nodes?.flatMap((file) =>
+    file &&
+    typeof file.path === "string" &&
+    typeof file.additions === "number" &&
+    typeof file.deletions === "number"
+      ? [{ path: file.path, additions: file.additions, deletions: file.deletions }]
+      : [],
+  );
   return {
     url: raw.url,
     repository,
@@ -72,6 +92,7 @@ function pullRequestOf(raw: RawPullRequest | null | undefined): WorkGitHubPullRe
           ? { checks: "pending" as const }
           : {}),
     ...(raw.mergeable === "CONFLICTING" ? { conflicting: true } : {}),
+    ...(files ? { sourceLines: workSourceLines(files) } : {}),
   };
 }
 

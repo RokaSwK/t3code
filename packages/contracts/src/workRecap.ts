@@ -49,6 +49,9 @@ export const WorkRecapItem = Schema.Struct({
     Schema.Struct({ label: Schema.String, state: PullRequestState, isDraft: Schema.Boolean }),
   ),
   branch: Schema.optional(Schema.String),
+  /** How big the work was, for ranking: its PRs' source lines and its conversation's replies. */
+  sourceLines: Schema.optional(Schema.Number),
+  slackMessages: Schema.optional(Schema.Number),
 });
 export type WorkRecapItem = typeof WorkRecapItem.Type;
 

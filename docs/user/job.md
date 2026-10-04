@@ -38,8 +38,10 @@ Choose **Ignore** on an item to hide it without counting it as completed. Restor
 Open **Recap** in Work for what you finished since your last workday (Friday, on a Monday), with
 today's plan and meetings, or for this week's work in the weekly demo view. Finished work is grouped
 into features under areas like Support or Mobile, so a PR, the thread that wrote it, and the Slack
-request behind it sit together; expand a feature to see each item. Chores fold into **Smaller
-things**. The **Text generation model** from **Settings → General** names the features and writes a
+request behind it sit together; expand a feature to see each item. Areas and features are ordered
+by size, biggest first: lines changed in your PRs (not tests, generated files, or lockfiles) and
+messages in the Slack conversation, so one large change ranks above many small ones. Chores fold
+into **Smaller things**. The **Text generation model** from **Settings → General** names the features and writes a
 short summary on top.
 
 Features are kept: new work joins the features it belongs to, so the recap reads the same each time

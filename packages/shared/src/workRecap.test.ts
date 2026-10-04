@@ -8,7 +8,13 @@ import {
 } from "@t3tools/contracts";
 
 import { buildWorkGroups, workItemKeys, type WorkThread } from "./work.ts";
-import { buildWorkAccomplishments, buildWorkPlan } from "./workRecap.ts";
+import {
+  buildWorkAccomplishments,
+  buildWorkPlan,
+  workRecapFeatureSize,
+  workRecapItemSize,
+  workSourceLines,
+} from "./workRecap.ts";
 
 const now = Date.parse("2026-09-28T12:00:00Z");
 const done = "2026-09-27T09:00:00Z";
@@ -119,6 +125,22 @@ describe("work recap", () => {
       now,
     });
     expect(recap(groups, state)).toHaveLength(1);
+    // The PR's lines and the conversation's replies count once for the one item.
+    const sized = slack({
+      ...state,
+      conversations: [{ ...conversation, replyCount: 6 }],
+      mergedPullRequests: [{ ...request, sourceLines: 120 }],
+    });
+    expect(
+      recap(
+        buildWorkGroups([thread], {
+          conversations: sized.conversations,
+          dismissed: sized.dismissed,
+          now,
+        }),
+        sized,
+      ),
+    ).toMatchObject([{ sourceLines: 120, slackMessages: 6 }]);
     expect(
       recap(groups, state, [{ keys: workItemKeys(groups[0]!), title: "Ignored", at: now }]),
     ).toEqual([]);
@@ -209,4 +231,38 @@ it("leaves out Slack posts that were only dismissed", () => {
       now,
     }),
   ).toEqual([]);
+});
+
+describe("work size", () => {
+  it("counts source lines only, not tests, generated files, lockfiles, or vendored code", () => {
+    const file = (path: string) => ({ path, additions: 10, deletions: 5 });
+    expect(
+      workSourceLines([
+        file("apps/web/src/Recap.tsx"),
+        file("apps/web/src/Recap.test.tsx"),
+        file("spec/models/user_spec.rb"),
+        file("pnpm-lock.yaml"),
+        file("ios/Podfile.lock"),
+        file("src/__snapshots__/Recap.snap"),
+        file("src/api/generated/client.ts"),
+        file(".repos/effect/index.ts"),
+        file("vendor/lib.js"),
+        file("server/billing.go"),
+        file("server/billing_test.go"),
+      ]),
+    ).toBe(30);
+  });
+
+  it("grows with diminishing returns, and a feature is led by its biggest item", () => {
+    expect(workRecapItemSize({})).toBe(1);
+    expect(workRecapItemSize({ sourceLines: 25 })).toBe(2);
+    expect(workRecapItemSize({ sourceLines: 75, slackMessages: 2 })).toBe(4);
+    const big = { sourceLines: 2_000 };
+    const small = { sourceLines: 10 };
+    expect(workRecapItemSize(big)).toBeLessThan(workRecapItemSize(small) * 6);
+    // Five small items do not outweigh one big one.
+    expect(workRecapFeatureSize([big])).toBeGreaterThan(
+      workRecapFeatureSize([small, small, small, small, small]),
+    );
+  });
 });

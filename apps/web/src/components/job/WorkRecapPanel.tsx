@@ -7,7 +7,12 @@ import type {
   WorkRecapItem,
   WorkRecapView,
 } from "@t3tools/contracts";
-import { buildWorkPlan, recapWaitingGroups, workGroupTitle } from "@t3tools/shared/workRecap";
+import {
+  buildWorkPlan,
+  recapWaitingGroups,
+  workGroupTitle,
+  workRecapFeatureSize,
+} from "@t3tools/shared/workRecap";
 import {
   CalendarIcon,
   CheckIcon,
@@ -60,6 +65,14 @@ interface RecapClusterView {
   readonly items: ReadonlyArray<WorkRecapItem>;
   readonly area: string | null;
   readonly minor: boolean;
+}
+
+/** Biggest feature first; the size of an area is the size of all its items together. */
+function bySize(clusters: ReadonlyArray<RecapClusterView>) {
+  return clusters
+    .map((cluster) => ({ cluster, size: workRecapFeatureSize(cluster.items) }))
+    .toSorted((a, b) => b.size - a.size)
+    .map(({ cluster }) => cluster);
 }
 
 function openExternal(url: string) {
@@ -436,10 +449,11 @@ export function WorkRecapPanel({
         ]
       : []),
   ];
-  const minorClusters = clusters.filter((cluster) => cluster.minor);
+  const minorClusters = bySize(clusters.filter((cluster) => cluster.minor));
 
-  // Features under the areas the model named (Support, Mobile, …), biggest first. An area of
-  // one item gets no heading of its own; those gather under "Other".
+  // Features under the areas the model named (Support, Mobile, …), biggest first by size: lines
+  // changed and Slack messages, with diminishing returns. An area of one item gets no heading of
+  // its own; those gather under "Other", which stays last.
   const byArea = new Map<string, RecapClusterView[]>();
   for (const cluster of clusters) {
     if (cluster.minor) continue;
@@ -457,19 +471,21 @@ export function WorkRecapPanel({
       return [
         {
           area,
-          clusters: list.toSorted((a, b) => b.items.length - a.items.length),
+          clusters: bySize(list),
           count,
+          size: workRecapFeatureSize(list.flatMap((cluster) => cluster.items)),
         },
       ];
     })
-    .toSorted((a, b) => b.count - a.count)
+    .toSorted((a, b) => b.size - a.size)
     .concat(
       other.length > 0
         ? [
             {
               area: "Other",
-              clusters: other,
+              clusters: bySize(other),
               count: other.reduce((total, cluster) => total + cluster.items.length, 0),
+              size: 0,
             },
           ]
         : [],
