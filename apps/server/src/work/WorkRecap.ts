@@ -296,6 +296,7 @@ export const make = Effect.gen(function* () {
         github: {
           reviewRequests: slackState.reviewRequests,
           authored: slackState.authoredPullRequests,
+          ...(slackState.mergedPullRequests ? { merged: slackState.mergedPullRequests } : {}),
           ...(settings.workGitHubOwners ? { owners: settings.workGitHubOwners } : {}),
         },
         now,

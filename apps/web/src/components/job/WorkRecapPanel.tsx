@@ -55,7 +55,12 @@ import { Skeleton } from "../ui/skeleton";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useWorkCalendar } from "./WorkCalendar";
-import { workItemKeys, workMatchesMarks, type WorkGroup } from "./workGroups";
+import {
+  WORK_DEPLOYMENT_LABELS,
+  workItemKeys,
+  workMatchesMarks,
+  type WorkGroup,
+} from "./workGroups";
 import {
   SlackChannelGlyph,
   T3Logo,
@@ -424,7 +429,19 @@ function AccomplishmentRow({
                     : item.pullRequest.label}
                 </span>
               ) : null}
-              {compact && item.evidence === "PR merged" ? null : (
+              {item.deployment ? (
+                <>
+                  {item.channel || item.pullRequest ? WORK_META_SEPARATOR : null}
+                  <span
+                    className={cn(
+                      "min-w-0 truncate",
+                      item.deployment === "failed" && "text-destructive",
+                    )}
+                  >
+                    {WORK_DEPLOYMENT_LABELS[item.deployment]}
+                  </span>
+                </>
+              ) : compact && item.evidence === "PR merged" ? null : (
                 <>
                   {item.channel || item.pullRequest ? WORK_META_SEPARATOR : null}
                   <span className="min-w-0 truncate">{item.evidence}</span>

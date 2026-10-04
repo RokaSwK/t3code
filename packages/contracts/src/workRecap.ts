@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { IsoDateTime } from "./baseSchemas.ts";
 import { PullRequestState } from "./pullRequest.ts";
-import { SlackChannelKind } from "./slack.ts";
+import { SlackChannelKind, WorkDeployment } from "./slack.ts";
 
 /**
  * The window a recap covers. The client picks it because only the client knows its timezone;
@@ -52,6 +52,8 @@ export const WorkRecapItem = Schema.Struct({
   /** How big the work was, for ranking: its PRs' source lines and its conversation's replies. */
   sourceLines: Schema.optional(Schema.Number),
   slackMessages: Schema.optional(Schema.Number),
+  /** Whether its merged PRs are deployed, when the repository shows deploys. */
+  deployment: Schema.optional(WorkDeployment),
 });
 export type WorkRecapItem = typeof WorkRecapItem.Type;
 

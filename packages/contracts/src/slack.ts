@@ -169,6 +169,10 @@ export const SlackDevinSession = Schema.Struct({
 });
 export type SlackDevinSession = typeof SlackDevinSession.Type;
 
+/** Whether a merged pull request's merge commit has gone out yet. */
+export const WorkDeployment = Schema.Literals(["deployed", "pending", "failed"]);
+export type WorkDeployment = typeof WorkDeployment.Type;
+
 /** An open pull request in the user's GitHub queue, with what it is waiting on. */
 export const WorkGitHubPullRequest = Schema.Struct({
   url: Schema.String,
@@ -185,6 +189,11 @@ export const WorkGitHubPullRequest = Schema.Struct({
   conflicting: Schema.optional(Schema.Boolean),
   /** Changed lines outside tests, generated files, lockfiles, and vendored code. */
   sourceLines: Schema.optional(Schema.Number),
+  /**
+   * A merged pull request's rollout, from the deploy workflows and production deployments on its
+   * base branch. Absent when the repository shows no deploys or the merge is too old to check.
+   */
+  deployment: Schema.optional(WorkDeployment),
 });
 export type WorkGitHubPullRequest = typeof WorkGitHubPullRequest.Type;
 

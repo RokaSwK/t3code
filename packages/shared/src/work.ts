@@ -21,6 +21,7 @@ import {
   type SlackMention,
   type SlackThread,
   type ThreadPullRequestSnapshot,
+  type WorkDeployment,
   type WorkGitHubPullRequest,
   type WorkItemMark,
 } from "@t3tools/contracts";
@@ -224,6 +225,38 @@ function linkedPullRequestAttention(
 
 const pullRequestKey = (request: { url: string; repository: string; number: number }) =>
   threadPullRequestKeyOf(legacyThreadPullRequestKey(request));
+
+/** How a merged pull request's rollout reads on done work. */
+export const WORK_DEPLOYMENT_LABELS: Record<WorkDeployment, string> = {
+  deployed: "Deployed",
+  pending: "Merged, not deployed yet",
+  failed: "Merged, deploy failed",
+};
+
+/** Work with several merged PRs is deployed once all of them are; a failure shows first. */
+export function combinedWorkDeployment(
+  deployments: ReadonlyArray<WorkDeployment | undefined>,
+): WorkDeployment | undefined {
+  const known = deployments.filter((deployment) => deployment !== undefined);
+  if (known.includes("failed")) return "failed";
+  if (known.includes("pending")) return "pending";
+  return known.length > 0 ? "deployed" : undefined;
+}
+
+/** Done because its PRs merged: the reason says whether they are deployed, when known. */
+function withDeployment(
+  attention: Attention,
+  urls: ReadonlyArray<string>,
+  merged: ReadonlyMap<string, WorkGitHubPullRequest>,
+): Attention {
+  if (
+    attention.status !== "done" ||
+    !["PR merged", "PRs merged", "Work completed"].includes(attention.reason)
+  )
+    return attention;
+  const deployment = combinedWorkDeployment(urls.map((url) => merged.get(url)?.deployment));
+  return deployment ? { status: "done", reason: WORK_DEPLOYMENT_LABELS[deployment] } : attention;
+}
 
 /** Stable identities keep ignored/planned work attached when a GitHub row joins Slack. */
 export function workItemKeys(group: WorkGroup): string[] {
@@ -468,6 +501,8 @@ export function buildWorkGroups(
     readonly github?: {
       readonly reviewRequests: ReadonlyArray<WorkGitHubPullRequest>;
       readonly authored: ReadonlyArray<WorkGitHubPullRequest>;
+      /** Your recently merged pull requests, for whether done work is deployed. */
+      readonly merged?: ReadonlyArray<WorkGitHubPullRequest>;
       /** Owners whose pull requests count, lowercase or not; absent means every owner. */
       readonly owners?: ReadonlyArray<string>;
     };
@@ -552,6 +587,9 @@ export function buildWorkGroups(
       (pullRequest) => [pullRequestKey(pullRequest), pullRequest] as const,
     ),
   );
+  const merged = new Map(
+    (options.github?.merged ?? []).map((pullRequest) => [pullRequest.url, pullRequest] as const),
+  );
   const waitOf = new Map(
     (options.waits ?? []).map((entry) => [`${entry.channelId}:${entry.ts}`, entry] as const),
   );
@@ -624,14 +662,21 @@ export function buildWorkGroups(
         threads: ordered,
         pullRequests: requests,
         slackLinks: [...slackLinks],
-        ...conversationStatusOf(
-          conversation,
-          ordered,
-          requests,
-          markedDone,
-          waitOf.get(`${conversation.channelId}:${conversation.ts}`) ?? null,
-          pullRequestDetails,
-          now,
+        ...withDeployment(
+          conversationStatusOf(
+            conversation,
+            ordered,
+            requests,
+            markedDone,
+            waitOf.get(`${conversation.channelId}:${conversation.ts}`) ?? null,
+            pullRequestDetails,
+            now,
+          ),
+          [
+            ...conversation.pullRequests.map((request) => request.url),
+            ...requests.map((request) => request.url),
+          ],
+          merged,
         ),
         updatedAt: DateTime.formatIso(DateTime.makeUnsafe(lastActivityMs(conversation, ordered))),
         markedDone,
@@ -647,7 +692,11 @@ export function buildWorkGroups(
       threads: ordered,
       pullRequests: requests,
       slackLinks: [...slackLinks],
-      ...statusOf(group, requests),
+      ...withDeployment(
+        statusOf(group, requests),
+        requests.map((request) => request.url),
+        merged,
+      ),
       updatedAt: ordered[0]!.updatedAt,
       markedDone: false,
       owner: null,

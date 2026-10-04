@@ -95,6 +95,8 @@ it("reduces a pull request's files to its source lines", () => {
             number: 9,
             repository: { nameWithOwner: "acme/app" },
             mergedAt: "2026-09-26T10:00:00Z",
+            baseRefName: "master",
+            mergeCommit: { oid: "abc123" },
             files: {
               nodes: [
                 { path: "src/refunds.ts", additions: 40, deletions: 10 },
@@ -109,4 +111,10 @@ it("reduces a pull request's files to its source lines", () => {
   });
   expect(queue?.merged[0]).toMatchObject({ sourceLines: 50 });
   expect(queue?.merged[0]).not.toHaveProperty("files");
+  // The merge commit stays on the server, for checking deploys.
+  expect(queue?.merged[0]).not.toHaveProperty("mergeCommit");
+  expect(queue?.mergeCommits.get("https://github.com/acme/app/pull/9")).toEqual({
+    base: "master",
+    oid: "abc123",
+  });
 });

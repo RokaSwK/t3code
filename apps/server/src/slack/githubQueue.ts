@@ -13,18 +13,21 @@ const QUEUE_SIZE = 50;
 /**
  * Your own pull requests also read per-file line counts (the first 100 files), which the
  * server reduces to `sourceLines` for the recap's size; the file list never leaves the server.
+ * Merged ones read their base branch and merge commit, to tell whether they are deployed.
  */
-const pullRequestFields = (files: boolean) => `... on PullRequest {
+const FILE_FIELDS = "files(first: 100) { nodes { path additions deletions } }";
+const pullRequestFields = (extra = "") => `... on PullRequest {
   url title number isDraft updatedAt mergedAt reviewDecision mergeable
   repository { nameWithOwner }
   author { login avatarUrl }
-  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }${files ? "\n  files(first: 100) { nodes { path additions deletions } }" : ""}
+  commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+  ${extra}
 }`;
 
 export const githubQueueQuery = (since: string) => `query {
-  reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${pullRequestFields(false)} } }
-  authored: search(query: "is:pr is:open archived:false author:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${pullRequestFields(true)} } }
-  merged: search(query: "is:pr is:merged archived:false author:@me merged:>=${since} sort:updated-desc", type: ISSUE, first: 100) { nodes { ${pullRequestFields(true)} } }
+  reviewRequested: search(query: "is:pr is:open archived:false review-requested:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${pullRequestFields()} } }
+  authored: search(query: "is:pr is:open archived:false author:@me", type: ISSUE, first: ${QUEUE_SIZE}) { nodes { ${pullRequestFields(FILE_FIELDS)} } }
+  merged: search(query: "is:pr is:merged archived:false author:@me merged:>=${since} sort:updated-desc", type: ISSUE, first: 100) { nodes { ${pullRequestFields(`${FILE_FIELDS} baseRefName mergeCommit { oid }`)} } }
 }`;
 
 interface RawPullRequest {
@@ -50,6 +53,13 @@ interface RawPullRequest {
       readonly deletions?: unknown;
     } | null>;
   } | null;
+  readonly baseRefName?: unknown;
+  readonly mergeCommit?: { readonly oid?: unknown } | null;
+}
+
+export interface MergeCommit {
+  readonly base: string;
+  readonly oid: string;
 }
 
 function pullRequestOf(raw: RawPullRequest | null | undefined): WorkGitHubPullRequest | null {
@@ -101,6 +111,8 @@ export function parseGitHubQueue(response: unknown): {
   readonly reviewRequested: ReadonlyArray<WorkGitHubPullRequest>;
   readonly authored: ReadonlyArray<WorkGitHubPullRequest>;
   readonly merged: ReadonlyArray<WorkGitHubPullRequest>;
+  /** Merged pull requests' base branch and merge commit, by URL; server-side only. */
+  readonly mergeCommits: ReadonlyMap<string, MergeCommit>;
 } | null {
   const data = (
     response as {
@@ -117,9 +129,20 @@ export function parseGitHubQueue(response: unknown): {
       const pullRequest = pullRequestOf(node);
       return pullRequest ? [pullRequest] : [];
     });
+  const mergeCommits = new Map<string, MergeCommit>();
+  for (const node of data.merged?.nodes ?? []) {
+    const oid = node?.mergeCommit?.oid;
+    if (
+      typeof node?.url === "string" &&
+      typeof node.baseRefName === "string" &&
+      typeof oid === "string"
+    )
+      mergeCommits.set(node.url, { base: node.baseRefName, oid });
+  }
   return {
     reviewRequested: list(data.reviewRequested.nodes),
     authored: list(data.authored.nodes),
     merged: list(data.merged?.nodes).filter((request) => request.mergedAt !== undefined),
+    mergeCommits,
   };
 }

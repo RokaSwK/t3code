@@ -248,6 +248,33 @@ describe("buildWorkGroups with Slack conversations", () => {
         }),
       ),
     ).toEqual(["done", "PR merged"]);
+    // Once GitHub shows the merge's rollout, done work says whether it went out.
+    const mergedRequest = {
+      url: "https://github.com/owner/repo/pull/42",
+      repository: "owner/repo",
+      number: 42,
+      state: "merged" as const,
+    };
+    const deployed = (deployment: "deployed" | "pending" | "failed") =>
+      status(conversation({ pullRequests: [mergedRequest] }), {
+        github: {
+          reviewRequests: [],
+          authored: [],
+          merged: [
+            {
+              ...mergedRequest,
+              title: "Ship it",
+              isDraft: false,
+              updatedAt: now,
+              mergedAt: now,
+              deployment,
+            },
+          ],
+        },
+      });
+    expect(deployed("deployed")).toEqual(["done", "Deployed"]);
+    expect(deployed("pending")).toEqual(["done", "Merged, not deployed yet"]);
+    expect(deployed("failed")).toEqual(["done", "Merged, deploy failed"]);
     const quietTs = slackTs(nowMs - WORK_QUIET_MS - 60_000);
     expect(
       status(

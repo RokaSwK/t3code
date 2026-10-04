@@ -131,7 +131,7 @@ describe("work recap", () => {
     const sized = slack({
       ...state,
       conversations: [{ ...conversation, replyCount: 6 }],
-      mergedPullRequests: [{ ...request, sourceLines: 120 }],
+      mergedPullRequests: [{ ...request, sourceLines: 120, deployment: "pending" }],
     });
     expect(
       recap(
@@ -142,7 +142,7 @@ describe("work recap", () => {
         }),
         sized,
       ),
-    ).toMatchObject([{ sourceLines: 120, slackMessages: 6 }]);
+    ).toMatchObject([{ sourceLines: 120, slackMessages: 6, deployment: "pending" }]);
     expect(
       recap(groups, state, [{ keys: workItemKeys(groups[0]!), title: "Ignored", at: now }]),
     ).toEqual([]);

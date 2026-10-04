@@ -266,6 +266,7 @@ function useWorkList(slackState: SlackState | null) {
   const waits = slackState?.conversationWaits;
   const reviewRequests = slackConnected ? slackState!.reviewRequests : undefined;
   const authored = slackConnected ? slackState!.authoredPullRequests : undefined;
+  const merged = slackConnected ? slackState!.mergedPullRequests : undefined;
   // The GitHub queue is read by the primary environment, which also holds this choice.
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const gitHubOwners = primaryEnvironmentId
@@ -287,6 +288,7 @@ function useWorkList(slackState: SlackState | null) {
               github: {
                 reviewRequests,
                 authored,
+                ...(merged ? { merged } : {}),
                 ...(gitHubOwners ? { owners: gitHubOwners } : {}),
               },
             }
@@ -302,6 +304,7 @@ function useWorkList(slackState: SlackState | null) {
       waits,
       reviewRequests,
       authored,
+      merged,
       gitHubOwners,
     ],
   );

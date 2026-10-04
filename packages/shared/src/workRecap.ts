@@ -11,6 +11,7 @@ import type {
   SlackState,
   SlackThread,
   ThreadPullRequestSnapshot,
+  WorkDeployment,
   WorkGitHubPullRequest,
   WorkItemMark,
   WorkRecapCitation,
@@ -18,6 +19,7 @@ import type {
 
 import { legacyThreadPullRequestKey, threadPullRequestKeyOf } from "./threadPullRequests.ts";
 import {
+  combinedWorkDeployment,
   gitHubOwnerOf,
   slackMessageSummary,
   slackWorkItemKeys,
@@ -51,10 +53,14 @@ export interface WorkAccomplishment {
   readonly sourceLines?: number;
   /** Replies in the item's Slack conversation. */
   readonly slackMessages?: number;
+  /** Whether its merged PRs are deployed, when the repository shows deploys. */
+  readonly deployment?: WorkDeployment;
 }
 
-/** A candidate with its pull requests' source lines by URL, so merged duplicates sum once. */
-type Candidate = WorkAccomplishment & { readonly lines?: Readonly<Record<string, number>> };
+/** A candidate with its pull requests from the GitHub queue by URL, so duplicates count once. */
+type Candidate = WorkAccomplishment & {
+  readonly github?: Readonly<Record<string, WorkGitHubPullRequest>>;
+};
 
 // Changed lines that show effort: tests, generated output, lockfiles, snapshots, and vendored
 // code don't.
@@ -104,22 +110,22 @@ function channelOf(thread: SlackThread) {
   return { channel: { name: thread.channelName, kind: thread.channelKind } };
 }
 
-/** The known source lines of these pull requests, by URL. */
-function linesOf(
+/** These pull requests as the GitHub queue knows them (lines, deployment), by URL. */
+function githubOf(
   urls: ReadonlyArray<string>,
   known: ReadonlyMap<string, WorkGitHubPullRequest>,
-): { readonly lines?: Record<string, number> } {
-  const lines: Record<string, number> = {};
+): { readonly github?: Record<string, WorkGitHubPullRequest> } {
+  const github: Record<string, WorkGitHubPullRequest> = {};
   for (const url of urls) {
-    const sourceLines = known.get(url)?.sourceLines;
-    if (sourceLines !== undefined) lines[url] = sourceLines;
+    const request = known.get(url);
+    if (request) github[url] = request;
   }
-  return Object.keys(lines).length > 0 ? { lines } : {};
+  return Object.keys(github).length > 0 ? { github } : {};
 }
 
-function groupSize(group: WorkGroup, known: ReadonlyMap<string, WorkGitHubPullRequest>) {
+function groupFacts(group: WorkGroup, known: ReadonlyMap<string, WorkGitHubPullRequest>) {
   return {
-    ...linesOf(
+    ...githubOf(
       [
         ...group.pullRequests.map((request) => request.url),
         ...(group.conversation?.pullRequests ?? []).map((request) => request.url),
@@ -188,7 +194,7 @@ export function buildWorkAccomplishments(input: {
         evidence: "Marked done",
         groupId: group.id,
         source: "slack",
-        ...groupSize(group, known),
+        ...groupFacts(group, known),
         ...(group.conversation
           ? { url: group.conversation.permalink, ...channelOf(group.conversation) }
           : {}),
@@ -210,7 +216,7 @@ export function buildWorkAccomplishments(input: {
           isDraft: false,
         },
         branch: request.snapshot.headBranch,
-        ...groupSize(group, known),
+        ...groupFacts(group, known),
         ...project,
       });
     }
@@ -257,8 +263,8 @@ export function buildWorkAccomplishments(input: {
       evidence: "Thread settled",
       source: "t3",
       ...(group
-        ? { groupId: group.id, ...groupSize(group, known) }
-        : linesOf(
+        ? { groupId: group.id, ...groupFacts(group, known) }
+        : githubOf(
             thread.pullRequests.map((request) => request.url),
             known,
           )),
@@ -292,7 +298,7 @@ export function buildWorkAccomplishments(input: {
         state: "merged",
         isDraft: false,
       },
-      ...linesOf([request.url], known),
+      ...githubOf([request.url], known),
     });
   }
   const result: Candidate[] = [];
@@ -313,7 +319,7 @@ export function buildWorkAccomplishments(input: {
       const pullRequest = all.find((known) => known.pullRequest)?.pullRequest;
       const url = all.find((known) => known.url)?.url;
       const branch = all.find((known) => known.branch)?.branch;
-      const lines = Object.assign({}, ...all.map((known) => known.lines ?? {}));
+      const github = Object.assign({}, ...all.map((known) => known.github ?? {}));
       const slackMessages = Math.max(0, ...all.map((known) => known.slackMessages ?? 0));
       const merged = {
         ...newest,
@@ -321,7 +327,7 @@ export function buildWorkAccomplishments(input: {
         ...(pullRequest ? { pullRequest } : {}),
         ...(url ? { url } : {}),
         ...(branch ? { branch } : {}),
-        ...(Object.keys(lines).length > 0 ? { lines } : {}),
+        ...(Object.keys(github).length > 0 ? { github } : {}),
         ...(slackMessages > 0 ? { slackMessages } : {}),
         keys: [...new Set([...item.keys, ...matches.flatMap((known) => known.keys)])],
       };
@@ -331,11 +337,18 @@ export function buildWorkAccomplishments(input: {
   }
   return result
     .sort((a, b) => b.at - a.at)
-    .map(({ lines, ...item }) =>
-      lines
-        ? { ...item, sourceLines: Object.values(lines).reduce((sum, count) => sum + count, 0) }
-        : item,
-    );
+    .map(({ github, ...item }) => {
+      const requests = Object.values(github ?? {});
+      const lines = requests.flatMap((request) => request.sourceLines ?? []);
+      const deployment = combinedWorkDeployment(requests.map((request) => request.deployment));
+      return {
+        ...item,
+        ...(lines.length > 0
+          ? { sourceLines: lines.reduce((total, count) => total + count, 0) }
+          : {}),
+        ...(deployment ? { deployment } : {}),
+      };
+    });
 }
 
 function projectOf(thread: WorkThread | undefined) {

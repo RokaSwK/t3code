@@ -30,6 +30,12 @@ nobody replied. Choose **Done** to mark any other conversation yourself; a new r
 else brings it back. **Not done** undoes your own mark. **Done**, **Ignore**, and **Unfollow**
 also offer **Undo** for a few seconds.
 
+Done work with your merged PRs, here and in the recap, says **Deployed**, **Merged, not deployed
+yet**, or **Merged, deploy failed**. A merge counts as deployed once a GitHub Actions workflow whose
+name includes deploy, publish, release, or OTA succeeds on its base branch at or after the merge, or
+a deployment to a production environment does. Repositories with neither show no deploy state. PRs
+merged in the last three days are checked with the rest of your GitHub queue.
+
 Choose **Ignore** on an item to hide it without counting it as completed. Restore it from
 **… → Ignored work**. Linked Slack messages and GitHub PRs stay together when ignored.
 

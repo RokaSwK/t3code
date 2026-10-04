@@ -153,6 +153,7 @@ export function buildWorkOverview(input: {
     github: {
       reviewRequests: input.slack.reviewRequests,
       authored: input.slack.authoredPullRequests,
+      ...(input.slack.mergedPullRequests ? { merged: input.slack.mergedPullRequests } : {}),
       ...(input.workGitHubOwners ? { owners: input.workGitHubOwners } : {}),
     },
     now: input.now,

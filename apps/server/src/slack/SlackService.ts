@@ -149,6 +149,12 @@ import {
   slackSocketErrorIsFinal,
 } from "./slackEvents.ts";
 import { runSlackSocket } from "./SlackSocket.ts";
+import {
+  deploymentsToCheck,
+  githubDeploymentsQuery,
+  parseGitHubDeployments,
+  withDeployments,
+} from "./githubDeployments.ts";
 import { GITHUB_QUEUE_INTERVAL_MS, githubQueueQuery, parseGitHubQueue } from "./githubQueue.ts";
 import { slackMentionedUserIds, slackMrkdwnToMarkdown, standardEmoji } from "./slackMrkdwn.ts";
 import { SlackRateLimiter, type SlackCallPriority } from "./slackRateLimiter.ts";
@@ -1846,6 +1852,42 @@ const make = Effect.gen(function* () {
     if (Exit.isFailure(result)) return;
     const queue = parseGitHubQueue(Option.getOrUndefined(decodeJson(result.value.stdout)));
     if (!queue) return;
+    // Merges keep their last known rollout; recent ones not yet deployed are checked again.
+    const previous = new Map(
+      mergedPullRequests.map((request) => [request.url, request.deployment]),
+    );
+    let merged = queue.merged.map((request) => {
+      const deployment = previous.get(request.url);
+      return deployment ? { ...request, deployment } : request;
+    });
+    const check = deploymentsToCheck(merged, queue.mergeCommits, githubQueueAt);
+    if (check.branches.length > 0) {
+      const deployments = yield* Effect.exit(
+        github.execute({
+          cwd: globalThis.process.cwd(),
+          args: [
+            "api",
+            "--hostname",
+            "github.com",
+            "graphql",
+            "-f",
+            `query=${githubDeploymentsQuery(check.branches)}`,
+          ],
+          rateLimitHost: "github.com",
+        }),
+      );
+      if (Exit.isSuccess(deployments)) {
+        merged = withDeployments(
+          merged,
+          check.requests,
+          queue.mergeCommits,
+          parseGitHubDeployments(
+            check.branches,
+            Option.getOrUndefined(decodeJson(deployments.value.stdout)),
+          ),
+        );
+      }
+    }
     const same = (
       left: ReadonlyArray<WorkGitHubPullRequest>,
       right: ReadonlyArray<WorkGitHubPullRequest>,
@@ -1853,11 +1895,11 @@ const make = Effect.gen(function* () {
     if (
       !same(queue.reviewRequested, reviewRequests) ||
       !same(queue.authored, authoredPullRequests) ||
-      !same(queue.merged, mergedPullRequests)
+      !same(merged, mergedPullRequests)
     ) {
       reviewRequests = queue.reviewRequested;
       authoredPullRequests = queue.authored;
-      mergedPullRequests = queue.merged;
+      mergedPullRequests = merged;
       dirty = true;
     }
   });
