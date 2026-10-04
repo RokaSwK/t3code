@@ -1,9 +1,9 @@
 import { WorkRecapDialog } from "./WorkRecapPanel";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, SlackState, SlackThread } from "@t3tools/contracts";
+import type { EnvironmentId, SlackMention, SlackState, SlackThread } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { EllipsisIcon, MessageCircleIcon, PencilLineIcon, SearchIcon, XIcon } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useMemo, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
@@ -44,6 +44,7 @@ import { WorkAgentButton } from "./WorkAgentButton";
 import { WorkDetail, type WorkSelection } from "./WorkDetail";
 import {
   buildWorkGroups,
+  openWorkMentions,
   slackTsToMs,
   ungroupedWorkChannelThreads,
   type WorkGroup,
@@ -142,7 +143,16 @@ function ConversationSignals({
   );
 }
 
-function SlackMeta({ thread, reason }: { readonly thread: SlackThread; readonly reason?: string }) {
+function SlackMeta({
+  thread,
+  reason,
+  author = thread,
+}: {
+  readonly thread: SlackThread;
+  readonly reason?: string;
+  /** Who wrote the message the row is about, when it is not the conversation's root. */
+  readonly author?: Pick<SlackThread, "authorName" | "authorAvatarUrl">;
+}) {
   return (
     <>
       <span className="inline-flex min-w-0 max-w-40 shrink items-center gap-1">
@@ -150,10 +160,10 @@ function SlackMeta({ thread, reason }: { readonly thread: SlackThread; readonly 
         <span className="truncate">{thread.channelName}</span>
       </span>
       {/* A direct message is named after the person, so the author would repeat it. */}
-      {thread.channelKind === "dm" && thread.authorName === thread.channelName ? null : (
+      {thread.channelKind === "dm" && author.authorName === thread.channelName ? null : (
         <>
           {WORK_META_SEPARATOR}
-          <WorkRowAuthor name={thread.authorName} avatarUrl={thread.authorAvatarUrl} />
+          <WorkRowAuthor name={author.authorName} avatarUrl={author.authorAvatarUrl} />
         </>
       )}
       {reason ? (
@@ -322,11 +332,22 @@ function useWorkList(slackState: SlackState | null) {
     const dismissedKeys = new Set(
       (slackState?.dismissed ?? []).map((thread) => `${thread.channelId}:${thread.ts}`),
     );
+    const mentions = slackConnected
+      ? openWorkMentions(slackState!.mentions, groups, {
+          ...(dismissed ? { dismissed } : {}),
+          ...(ignoredItems ? { ignored: ignoredItems } : {}),
+        })
+      : [];
+    // A new thread that mentions you is listed once, as the mention.
+    const mentionKeys = new Set(
+      mentions.map((mention) => `${mention.thread.channelId}:${mention.thread.ts}`),
+    );
     const fresh: SlackThread[] = [];
     const cleared: SlackThread[] = [];
     for (const thread of ungroupedWorkChannelThreads(channelThreads ?? [], groups)) {
       if (workMatchesMarks(slackWorkItemKeys(thread), ignoredItems ?? [])) continue;
       const key = `${thread.channelId}:${thread.ts}`;
+      if (mentionKeys.has(key)) continue;
       if (dismissedKeys.has(key) || slackThreadDoneReason(thread) !== null) cleared.push(thread);
       else fresh.push(thread);
     }
@@ -340,6 +361,7 @@ function useWorkList(slackState: SlackState | null) {
       waiting: yours.filter((group) => group.status === "waiting"),
       watching: mine.filter((group) => group.owner !== null && group.status !== "done"),
       done: mine.filter((group) => group.status === "done"),
+      mentions,
       fresh,
       cleared,
       other,
@@ -353,7 +375,15 @@ function useWorkList(slackState: SlackState | null) {
           ),
       ),
     };
-  }, [groups, includedProjects, slackConnected, slackState, channelThreads, ignoredItems]);
+  }, [
+    groups,
+    includedProjects,
+    slackConnected,
+    slackState,
+    channelThreads,
+    ignoredItems,
+    dismissed,
+  ]);
 }
 
 type WorkList = ReturnType<typeof useWorkList>;
@@ -370,6 +400,10 @@ function selectionFor(list: WorkList, id: string | null): WorkSelection | null {
     return group ? { kind: "work", group } : null;
   }
   const key = id.slice(2);
+  if (id.startsWith("m:")) {
+    const mention = list.mentions.find((candidate) => mentionKey(candidate) === key);
+    return mention ? { kind: "mention", mention } : null;
+  }
   const fresh = list.fresh.find((thread) => `${thread.channelId}:${thread.ts}` === key);
   if (fresh) return { kind: "new", thread: fresh, cleared: false };
   const cleared = list.cleared.find((thread) => `${thread.channelId}:${thread.ts}` === key);
@@ -448,6 +482,35 @@ function ConversationRows({
       />
     ) : null,
   );
+}
+
+const mentionKey = (mention: SlackMention) => `${mention.message.channelId}:${mention.message.ts}`;
+
+function MentionRows({
+  mentions,
+  selectedId,
+  onSelect,
+}: {
+  readonly mentions: ReadonlyArray<SlackMention>;
+  readonly selectedId: string | null;
+  readonly onSelect: (id: string) => void;
+}) {
+  return mentions.map((mention) => {
+    const id = `m:${mentionKey(mention)}`;
+    return (
+      <WorkRow
+        key={id}
+        id={id}
+        selected={selectedId === id}
+        glyph={<WorkStatusDot status="needs" reason="Mentioned you" />}
+        source="slack"
+        title={slackMessageSummary(mention.message.markdown)}
+        meta={<SlackMeta thread={mention.thread} author={mention.message} />}
+        updatedAt={slackIso(mention.message.ts)}
+        onSelect={onSelect}
+      />
+    );
+  });
 }
 
 function NewThreadRows({
@@ -560,14 +623,24 @@ export function JobPage() {
   const searchRef = useRef<HTMLInputElement>(null);
   const searching = search.trim().length > 0;
   const searchIndex = useMemo(
-    () => buildWorkSearchIndex(fullList.all, [...fullList.fresh, ...fullList.cleared], projects),
+    () =>
+      buildWorkSearchIndex(
+        fullList.all,
+        [
+          ...fullList.fresh,
+          ...fullList.cleared,
+          // Searched by what was said to you, under the mention's own key.
+          ...fullList.mentions.map((mention) => ({ ...mention.thread, ...mention.message })),
+        ],
+        projects,
+      ),
     [fullList, projects],
   );
   const list = useMemo(() => {
     if (!searching) return fullList;
     const matchesGroup = (group: WorkGroup) =>
       workSearchMatches(searchIndex.groups.get(group.id), search);
-    const matchesThread = (thread: SlackThread) =>
+    const matchesThread = (thread: Pick<SlackThread, "channelId" | "ts">) =>
       workSearchMatches(searchIndex.threads.get(`${thread.channelId}:${thread.ts}`), search);
     return {
       ...fullList,
@@ -576,6 +649,7 @@ export function JobPage() {
       waiting: fullList.waiting.filter(matchesGroup),
       watching: fullList.watching.filter(matchesGroup),
       done: fullList.done.filter(matchesGroup),
+      mentions: fullList.mentions.filter((mention) => matchesThread(mention.message)),
       other: fullList.other.filter(matchesGroup),
       fresh: fullList.fresh.filter(matchesThread),
       cleared: fullList.cleared.filter(matchesThread),
@@ -607,7 +681,8 @@ export function JobPage() {
     );
     return roots.find((project) => project.environmentId === environmentId) ?? roots[0] ?? null;
   }, [projects, configs, environmentId]);
-  const active = list.needs.length + list.working.length + list.waiting.length;
+  const active =
+    list.needs.length + list.mentions.length + list.working.length + list.waiting.length;
   const resultCount =
     active +
     list.watching.length +
@@ -740,20 +815,33 @@ export function JobPage() {
                   ["In progress", list.working],
                   ["Waiting", list.waiting],
                 ] as const
-              ).map(([label, groups]) =>
-                groups.length > 0 ? (
-                  <section key={label} className="flex flex-col">
-                    <WorkGroupHeader label={label} count={groups.length} />
-                    <ConversationRows
-                      devinAvatarUrl={state?.devinAvatarUrl}
-                      draftKeys={draftKeys}
-                      groups={groups}
-                      selectedId={selectedId}
-                      onSelect={setSelectedId}
-                    />
-                  </section>
-                ) : null,
-              )}
+              ).map(([label, groups]) => (
+                <Fragment key={label}>
+                  {groups.length > 0 ? (
+                    <section className="flex flex-col">
+                      <WorkGroupHeader label={label} count={groups.length} />
+                      <ConversationRows
+                        devinAvatarUrl={state?.devinAvatarUrl}
+                        draftKeys={draftKeys}
+                        groups={groups}
+                        selectedId={selectedId}
+                        onSelect={setSelectedId}
+                      />
+                    </section>
+                  ) : null}
+                  {/* Mentions need you too, so they follow what does. */}
+                  {label === "Needs me" && list.mentions.length > 0 ? (
+                    <section className="flex flex-col">
+                      <WorkGroupHeader label="Mentions" count={list.mentions.length} />
+                      <MentionRows
+                        mentions={list.mentions}
+                        selectedId={selectedId}
+                        onSelect={setSelectedId}
+                      />
+                    </section>
+                  ) : null}
+                </Fragment>
+              ))}
               {list.slackConnected &&
               (!searching || list.fresh.length + list.cleared.length > 0) ? (
                 <section className="flex flex-col">

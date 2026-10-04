@@ -85,6 +85,8 @@ function dependencies(
     includedChannelIds: [],
     devin: { status: "disconnected" },
     conversations: [],
+    mentions: [],
+    events: { status: "off" },
     threads: [],
     dismissed: [],
     conversationOwners: [],

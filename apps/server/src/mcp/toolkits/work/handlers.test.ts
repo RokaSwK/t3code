@@ -77,6 +77,8 @@ const slackState = (overrides: Partial<SlackState>): SlackState => ({
   sync: { channelCount: 0, availableChannelCount: 0, syncedChannelCount: 0 },
   threads: [],
   conversations: [],
+  mentions: [],
+  events: { status: "off" },
   dismissed: [],
   includedChannelIds: [],
   conversationOwners: [],

@@ -5,6 +5,8 @@ import {
   usePrimarySettingsAvailable,
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
+import { primaryServerSettingsAtom } from "~/state/server";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -23,6 +25,7 @@ import {
   type WorkGroup,
 } from "./workGroups";
 import { localWorkDate } from "./workRecap";
+import { showWorkUndoToast } from "./workUndo";
 
 /** Ignoring never marks a conversation or PR as completed. Plans are explicit and dated. */
 export function WorkItemActions({
@@ -71,13 +74,17 @@ export function WorkItemActions({
         size="xs"
         variant="ghost"
         onClick={() => {
-          update({
-            workIgnoredItems: [
-              ...(settings.workIgnoredItems ?? []),
-              { keys, title, at: Date.now() },
-            ],
-          });
+          const mark = { keys, title, at: Date.now() };
+          update({ workIgnoredItems: [...(settings.workIgnoredItems ?? []), mark] });
           onIgnore();
+          // Settings may have changed since; undo removes only this mark from the latest.
+          showWorkUndoToast("Ignored", () =>
+            update({
+              workIgnoredItems: (
+                appAtomRegistry.get(primaryServerSettingsAtom).workIgnoredItems ?? []
+              ).filter((item) => item.at !== mark.at),
+            }),
+          );
         }}
       >
         <EyeOffIcon />

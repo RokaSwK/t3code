@@ -57,6 +57,28 @@ describe("summarizeSlackConversation", () => {
     assert.strictEqual(summary?.latestTs, "4.000001");
   });
 
+  it("does not let an app's post decide who the conversation waits on", () => {
+    const summary = summarizeSlackConversation(
+      [
+        { ts: "1.000001", user: "U2", text: "can you fix it?" },
+        { ts: "2.000001", thread_ts: "1.000001", user: "U1", text: "on it" },
+        {
+          ts: "3.000001",
+          thread_ts: "1.000001",
+          user: "UGITHUB",
+          bot_id: "BGITHUB",
+          bot_profile: { name: "GitHub" },
+          text: "PR #12 opened",
+        },
+        { ts: "4.000001", thread_ts: "1.000001", subtype: "bot_message", text: "Deploy done" },
+      ],
+      "U1",
+      devin,
+    );
+    assert.deepStrictEqual(summary?.lastReply, { by: "me", userId: "U1", ts: "2.000001" });
+    assert.strictEqual(summary?.latestTs, "4.000001");
+  });
+
   it("notices when Devin's session went to sleep", () => {
     const summary = summarizeSlackConversation(
       [

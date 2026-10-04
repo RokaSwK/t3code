@@ -100,6 +100,17 @@ export const WorkOverviewResult = Schema.Struct({
     done: NonNegativeInt,
   }),
   items: Schema.Array(WorkItem),
+  /** Messages that tag the user, outside the items above, that they have not answered. */
+  mentions: Schema.Array(
+    Schema.Struct({
+      permalink: Schema.String,
+      conversation: Schema.String,
+      channel: Schema.String,
+      author: Schema.String,
+      text: Schema.String,
+      at: Schema.String,
+    }),
+  ),
   newThreads: Schema.Array(
     Schema.Struct({
       permalink: Schema.String,
@@ -120,7 +131,7 @@ export const WorkOverviewResult = Schema.Struct({
 export type WorkOverviewResult = typeof WorkOverviewResult.Type;
 
 const WorkOverviewTool = Tool.make("work_overview", {
-  description: `The user's work as the Work page shows it: their Slack conversations (followed with 👀, Devin threads they are in, handed to others) and GitHub pull requests waiting for their review or theirs, grouped needs / working / waiting / watching / done with the reason, plus the T3 threads, Devin sessions, and pull requests on each, T3 work in their folders, and the projects you can start threads in. Start triage here. ${WORK_ACCESS}`,
+  description: `The user's work as the Work page shows it: their Slack conversations (followed with 👀, Devin threads they are in, handed to others) and GitHub pull requests waiting for their review or theirs, grouped needs / working / waiting / watching / done with the reason, mentions of the user they have not answered (reply in the conversation link, or mark it done), plus the T3 threads, Devin sessions, and pull requests on each, T3 work in their folders, and the projects you can start threads in. Start triage here. ${WORK_ACCESS}`,
   parameters: Schema.Struct({
     statuses: Schema.optional(
       Schema.Array(WorkStatusName).annotate({

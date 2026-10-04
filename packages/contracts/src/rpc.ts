@@ -283,6 +283,7 @@ import {
   SlackSetConversationWaitInput,
   SlackSetReplyDraftInput,
   SlackSendReplyInput,
+  SlackSetAppTokenInput,
 } from "./slack.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -415,6 +416,7 @@ export const WS_METHODS = {
   slackSetConversationWait: "slack.setConversationWait",
   slackSetReplyDraft: "slack.setReplyDraft",
   slackSendReply: "slack.sendReply",
+  slackSetAppToken: "slack.setAppToken",
   devinConnect: "devin.connect",
   devinDisconnect: "devin.disconnect",
 
@@ -1460,6 +1462,12 @@ const WsSlackSendReplyRpc = Rpc.make(WS_METHODS.slackSendReply, {
   error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
 });
 
+/** Saves a Slack app-level token after checking it opens a Socket Mode connection. */
+const WsSlackSetAppTokenRpc = Rpc.make(WS_METHODS.slackSetAppToken, {
+  payload: SlackSetAppTokenInput,
+  error: Schema.Union([SlackError, EnvironmentAuthorizationError]),
+});
+
 /** Saves a Devin API key after checking it with Devin. */
 const WsDevinConnectRpc = Rpc.make(WS_METHODS.devinConnect, {
   payload: DevinConnectInput,
@@ -1753,6 +1761,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSlackSetConversationWaitRpc,
   WsSlackSetReplyDraftRpc,
   WsSlackSendReplyRpc,
+  WsSlackSetAppTokenRpc,
   WsDevinConnectRpc,
   WsDevinDisconnectRpc,
   WsSubscribeSlackStateRpc,

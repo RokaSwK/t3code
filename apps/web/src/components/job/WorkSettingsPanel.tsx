@@ -11,11 +11,14 @@ import {
   type EnvironmentId,
   ProjectId,
   type SlackConnection,
+  type SlackEvents,
   type SlackState,
+  slackAppManifest,
 } from "@t3tools/contracts";
 import { gitHubOwnerOf } from "@t3tools/shared/work";
 import { useState } from "react";
 
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { readLocalApi } from "~/localApi";
 import { useUpdateEnvironmentSettings } from "~/hooks/useSettings";
 import {
@@ -109,6 +112,97 @@ function SlackSettings({
         }
       />
     </>
+  );
+}
+
+const EVENTS_DESCRIPTION: Record<SlackEvents["status"], string> = {
+  off: "",
+  connecting: "Connecting to Slack…",
+  live: "Changes in your conversations show within seconds. Slack is still checked every 15 minutes to catch anything missed.",
+  failed: "Live updates stopped. Slack is checked every few minutes instead.",
+};
+
+/** Socket Mode: Slack says what changed instead of being asked every few minutes. */
+function SlackEventsSettings({
+  environmentId,
+  events,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly events: SlackEvents;
+}) {
+  const setAppToken = useAtomCommand(slackEnvironment.setAppToken, { reportFailure: false });
+  const { copyToClipboard, isCopied } = useCopyToClipboard();
+  const [token, setToken] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (events.status !== "off") {
+    return (
+      <SettingsRow
+        id="slack-live-updates"
+        title="Live updates"
+        description={events.error ?? EVENTS_DESCRIPTION[events.status]}
+        control={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void setAppToken({ environmentId, input: { token: null } })}
+          >
+            Turn off
+          </Button>
+        }
+      />
+    );
+  }
+  return (
+    <SettingsRow
+      id="slack-live-updates"
+      title="Live updates"
+      description={
+        error ??
+        "Show changes as they happen instead of checking every few minutes. In your Slack app, paste this manifest under App Manifest and save, then under Basic Information generate an app-level token with connections:write and paste it here."
+      }
+    >
+      <form
+        className="flex gap-2 px-3 pb-3 sm:px-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setPending(true);
+          setError(null);
+          void setAppToken({ environmentId, input: { token: token.trim() } }).then((result) => {
+            setPending(false);
+            if (result._tag === "Failure") {
+              const failure = squashAtomCommandFailure(result);
+              setError(
+                failure instanceof Error ? failure.message : "Slack did not accept the token.",
+              );
+              return;
+            }
+            setToken("");
+          });
+        }}
+      >
+        <Button
+          size="sm"
+          variant="outline"
+          type="button"
+          onClick={() => copyToClipboard(JSON.stringify(slackAppManifest(), null, 2))}
+        >
+          {isCopied ? "Copied" : "Copy manifest"}
+        </Button>
+        <Input
+          aria-label="Slack app-level token"
+          className="flex-1"
+          type="password"
+          autoComplete="off"
+          placeholder="xapp-…"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+        />
+        <Button size="sm" type="submit" disabled={pending || !token.trim().startsWith("xapp-")}>
+          Save
+        </Button>
+      </form>
+    </SettingsRow>
   );
 }
 
@@ -387,7 +481,12 @@ export function WorkSettingsPanel() {
         ) : state === null ? (
           <Skeleton className="m-4 h-16" />
         ) : (
-          <SlackSettings environmentId={environmentId} connection={state.connection} />
+          <>
+            <SlackSettings environmentId={environmentId} connection={state.connection} />
+            {state.connection.status === "connected" ? (
+              <SlackEventsSettings environmentId={environmentId} events={state.events} />
+            ) : null}
+          </>
         )}
       </SettingsSection>
       <SettingsSection id="calendar" title="Google Calendar">

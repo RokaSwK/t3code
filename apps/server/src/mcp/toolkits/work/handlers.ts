@@ -16,7 +16,9 @@ import {
 import {
   buildWorkGroups,
   includedWorkProjects,
+  openWorkMentions,
   slackMessageSummary,
+  slackTsToMs,
   ungroupedWorkChannelThreads,
   workItemKeys,
   workMatchesMarks,
@@ -220,10 +222,26 @@ export function buildWorkOverview(input: {
             replyCount: thread.replyCount,
           }))
       : [];
+  const mentions = slackConnected
+    ? openWorkMentions(input.slack.mentions, groups, {
+        dismissed: input.slack.dismissed,
+        ...(input.workIgnoredItems ? { ignored: input.workIgnoredItems } : {}),
+      })
+        .slice(0, 20)
+        .map((mention) => ({
+          permalink: mention.permalink,
+          conversation: mention.thread.permalink,
+          channel: mention.thread.channelName,
+          author: mention.message.authorName,
+          text: cut(mention.message.markdown, WORK_TEXT_CHARS),
+          at: DateTime.formatIso(DateTime.makeUnsafe(slackTsToMs(mention.message.ts))),
+        }))
+    : [];
   return {
     slackConnected,
     counts,
     items,
+    mentions,
     newThreads,
     projects: input.projects.map((project) => ({
       projectId: project.id,

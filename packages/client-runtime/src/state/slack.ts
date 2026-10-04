@@ -85,6 +85,10 @@ export function createSlackEnvironmentAtoms<R, E>(
       label: "environment-data:slack:send-reply",
       tag: WS_METHODS.slackSendReply,
     }),
+    setAppToken: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:slack:set-app-token",
+      tag: WS_METHODS.slackSetAppToken,
+    }),
     devinConnect: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:slack:devin-connect",
       tag: WS_METHODS.devinConnect,

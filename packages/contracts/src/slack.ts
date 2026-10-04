@@ -43,7 +43,20 @@ export const SLACK_USER_SCOPES = [
   "files:read",
 ] as const;
 
-/** The manifest the "Create Slack app" link prefills. */
+/**
+ * Messages and reactions in the user's conversations, delivered over Socket Mode so the server
+ * reads what changed instead of polling for it. They need no scopes beyond the ones above.
+ */
+export const SLACK_USER_EVENTS = [
+  "message.channels",
+  "message.groups",
+  "message.im",
+  "message.mpim",
+  "reaction_added",
+  "reaction_removed",
+] as const;
+
+/** The manifest the "Create Slack app" link prefills, and the one to paste to turn on events. */
 export function slackAppManifest() {
   return {
     display_information: {
@@ -56,8 +69,9 @@ export function slackAppManifest() {
       pkce_enabled: true,
     },
     settings: {
+      event_subscriptions: { user_events: [...SLACK_USER_EVENTS] },
       org_deploy_enabled: false,
-      socket_mode_enabled: false,
+      socket_mode_enabled: true,
       token_rotation_enabled: false,
     },
   };
@@ -196,6 +210,16 @@ export const SlackThread = Schema.Struct({
 });
 export type SlackThread = typeof SlackThread.Type;
 
+/** A message that tags you and that you have not answered, in the conversation it is in. */
+export const SlackMention = Schema.Struct({
+  /** The conversation root, or the mention itself when it is not a reply. */
+  thread: SlackThread,
+  message: SlackMessage,
+  /** Link to the mention itself. */
+  permalink: Schema.String,
+});
+export type SlackMention = typeof SlackMention.Type;
+
 export const SlackConnection = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("disconnected"),
@@ -251,6 +275,28 @@ export const SlackDismissedThread = Schema.Struct({
 });
 export type SlackDismissedThread = typeof SlackDismissedThread.Type;
 
+/**
+ * Live updates over Slack's Socket Mode, with the app-level token saved on this server. While
+ * live, polling only reconciles; without a token everything is polled.
+ */
+export const SlackEvents = Schema.Struct({
+  status: Schema.Literals(["off", "connecting", "live", "failed"]),
+  error: Schema.optional(Schema.String),
+});
+export type SlackEvents = typeof SlackEvents.Type;
+
+/** Saves an app-level token (`xapp-…`, with `connections:write`), or removes it with `null`. */
+export const SlackSetAppTokenInput = Schema.Struct({
+  token: Schema.NullOr(
+    Schema.String.check(
+      Schema.makeFilter(
+        (value) => /^xapp-[\w-]+$/.test(value.trim()) || "Paste an app-level token (xapp-…).",
+      ),
+    ),
+  ),
+});
+export type SlackSetAppTokenInput = typeof SlackSetAppTokenInput.Type;
+
 /** The Devin API key on this server. The key itself never leaves the server. */
 export const DevinConnection = Schema.Union([
   Schema.Struct({ status: Schema.Literal("disconnected"), error: Schema.optional(Schema.String) }),
@@ -274,6 +320,11 @@ export const SlackState = Schema.Struct({
    * the reaction and the messages are the only state to manage.
    */
   conversations: Schema.Array(SlackThread).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  /**
+   * Messages from the last two weeks that tag you, with no later message or reaction from you,
+   * newest first, one per conversation. Marking the conversation done clears them.
+   */
+  mentions: Schema.Array(SlackMention).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   /**
    * Threads the user marked done on the Work page. Kept on the server so every device agrees.
    */
@@ -335,6 +386,7 @@ export const SlackState = Schema.Struct({
   devin: DevinConnection.pipe(
     Schema.withDecodingDefault(Effect.succeed({ status: "disconnected" as const })),
   ),
+  events: SlackEvents.pipe(Schema.withDecodingDefault(Effect.succeed({ status: "off" as const }))),
 });
 export type SlackState = typeof SlackState.Type;
 

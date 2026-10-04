@@ -3684,6 +3684,10 @@ const makeWsRpcLayer = (
             slackService.setConversationOwner(input),
             { "rpc.aggregate": "slack" },
           ),
+        [WS_METHODS.slackSetAppToken]: (input) =>
+          observeRpcEffect(WS_METHODS.slackSetAppToken, slackService.setAppToken(input), {
+            "rpc.aggregate": "slack",
+          }),
         [WS_METHODS.devinConnect]: (input) =>
           observeRpcEffect(WS_METHODS.devinConnect, slackService.devinConnect(input), {
             "rpc.aggregate": "slack",

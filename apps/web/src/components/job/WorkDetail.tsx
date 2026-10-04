@@ -6,6 +6,7 @@ import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import {
   type EnvironmentId,
   SLACK_FOLLOW_REACTION,
+  type SlackMention,
   type SlackPullRequest,
   type SlackThread,
 } from "@t3tools/contracts";
@@ -42,7 +43,8 @@ import {
 import { SlackConversationView } from "./SlackConversationView";
 import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 import { WorkItemActions } from "./WorkItemActions";
-import type { WorkGroup, WorkPullRequest, WorkThread } from "./workGroups";
+import { showWorkUndoToast } from "./workUndo";
+import { slackTsToMs, type WorkGroup, type WorkPullRequest, type WorkThread } from "./workGroups";
 import {
   DEVIN_STATE_PRESENTATION,
   DevinLogo,
@@ -56,6 +58,7 @@ import {
 export type WorkSelection =
   | { readonly kind: "conversation"; readonly group: WorkGroup }
   | { readonly kind: "new"; readonly thread: SlackThread; readonly cleared: boolean }
+  | { readonly kind: "mention"; readonly mention: SlackMention }
   | { readonly kind: "work"; readonly group: WorkGroup }
   | { readonly kind: "pullRequest"; readonly group: WorkGroup };
 
@@ -381,19 +384,33 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
   const setWait = useAtomCommand(slackEnvironment.setConversationWait, { reportFailure: false });
   const [busy, setBusy] = useState(false);
   const ref = { channelId: thread.channelId, ts: thread.ts };
-  const run = (action: () => Promise<{ readonly _tag: string }>, failure: string) => {
+  const run = (
+    action: () => Promise<{ readonly _tag: string }>,
+    failure: string,
+    undo?: { readonly title: string; readonly action: () => Promise<{ readonly _tag: string }> },
+  ) => {
     setBusy(true);
     void action().then((result) => {
       setBusy(false);
       if (result._tag === "Failure") toastManager.add({ type: "error", title: failure });
+      else if (undo) {
+        showWorkUndoToast(undo.title, () => {
+          void undo.action().then((undone) => {
+            if (undone._tag === "Failure") toastManager.add({ type: "error", title: failure });
+          });
+        });
+      }
     });
   };
+  const setDone = (dismissed: boolean) =>
+    setDismissed({ environmentId, input: { ...ref, dismissed } });
   return {
     busy,
     markDone: (done: boolean) =>
       run(
-        () => setDismissed({ environmentId, input: { ...ref, dismissed: done } }),
+        () => setDone(done),
         "Could not update the conversation",
+        done ? { title: "Marked done", action: () => setDone(false) } : undefined,
       ),
     follow: () =>
       run(
@@ -404,7 +421,15 @@ function useConversationActions(environmentId: EnvironmentId, thread: SlackThrea
           }),
         "Could not follow the thread",
       ),
-    unfollow: () => run(() => unfollow({ environmentId, input: ref }), "Could not unfollow"),
+    unfollow: () =>
+      run(() => unfollow({ environmentId, input: ref }), "Could not unfollow", {
+        title: "Unfollowed",
+        action: () =>
+          setReaction({
+            environmentId,
+            input: { ...ref, name: SLACK_FOLLOW_REACTION, reacted: true },
+          }),
+      }),
     stopWaiting: () =>
       run(
         () => setWait({ environmentId, input: { ...ref, member: null } }),
@@ -425,11 +450,14 @@ function SlackDetail({
   status,
   group,
   cleared,
+  slackUrl = thread.permalink,
   onClose,
 }: {
   readonly environmentId: EnvironmentId;
   readonly devinAvatarUrl: string | undefined;
   readonly thread: SlackThread;
+  /** Where "Open in Slack" goes; a mention opens at the message that tags you. */
+  readonly slackUrl?: string;
   readonly status: ReactNode;
   readonly group: WorkGroup | null;
   readonly cleared: boolean;
@@ -455,7 +483,7 @@ function SlackDetail({
           </>
         }
       >
-        <OpenInSlackButton url={thread.permalink} />
+        <OpenInSlackButton url={slackUrl} />
         <Menu>
           <MenuTrigger render={<Button size="icon-sm" variant="ghost" aria-label="More actions" />}>
             <EllipsisIcon />
@@ -753,6 +781,31 @@ export function WorkDetail({
         thread={selection.group.conversation!}
         status={<StatusLine group={selection.group} />}
         group={selection.group}
+        cleared={false}
+        onClose={onClose}
+      />
+    );
+  }
+  if (selection.kind === "mention") {
+    const { mention } = selection;
+    return (
+      <SlackDetail
+        key={`${mention.message.channelId}:${mention.message.ts}`}
+        environmentId={environmentId}
+        devinAvatarUrl={devinAvatarUrl}
+        thread={mention.thread}
+        slackUrl={mention.permalink}
+        status={
+          <>
+            <WorkStatusDot status="needs" reason="Mentioned you" />
+            <span className="font-medium">Mentioned you</span>
+            <span className="truncate text-muted-foreground">
+              {mention.message.authorName} ·{" "}
+              {formatRelativeTimeLabel(new Date(slackTsToMs(mention.message.ts)).toISOString())}
+            </span>
+          </>
+        }
+        group={null}
         cleared={false}
         onClose={onClose}
       />

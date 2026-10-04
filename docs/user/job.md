@@ -16,12 +16,19 @@ it beside the list, with the Devin sessions, T3 threads, and pull requests worki
 agent is waiting on you (a T3 approval, question, plan, or error, or a Devin session waiting for
 input), a pull request has failing checks, a merge conflict, or requested changes, or Devin
 replied or finished and you have not looked yet. **In progress** means an agent is working or a
-PR is open. **Waiting** means you replied last or a PR is waiting on checks or review.
+PR is open. **Waiting** means you replied last or a PR is waiting on checks or review. Posts by
+apps, such as CI or GitHub notifications, don't count as replies.
+
+**Mentions** lists messages from the last two weeks that tag you and that you have not answered,
+in conversations that are not already in your work. Writing later in the conversation (anywhere
+later in a direct message) or reacting to the message answers it. Choose **Done** to clear one
+yourself; a newer mention brings the conversation back.
 
 A conversation is **Done** when anyone reacts to it with a tick (✅, ✔️, or ☑️), when every PR
 it links to is merged or closed, or after three quiet days when you or Devin had the last word or
 nobody replied. Choose **Done** to mark any other conversation yourself; a new reply from someone
-else brings it back. **Not done** undoes your own mark.
+else brings it back. **Not done** undoes your own mark. **Done**, **Ignore**, and **Unfollow**
+also offer **Undo** for a few seconds.
 
 Choose **Ignore** on an item to hide it without counting it as completed. Restore it from
 **… → Ignored work**. Linked Slack messages and GitHub PRs stay together when ignored.
@@ -127,7 +134,7 @@ To see whether each session is working, waiting for you, or finished, add a Devi
 **Settings → Work**. Create the key in your Devin organization's settings. It stays on your T3
 Code server. Without a key, T3 Code goes by Devin's messages in Slack instead.
 
-Finding Devin threads uses Slack search, sending replies needs permission to post, and image
+Finding Devin threads and mentions uses Slack search, sending replies needs permission to post, and image
 previews need file access. When a permission is missing, **Settings → Work** asks you to sign in again.
 
 ## New in your channels
@@ -157,6 +164,16 @@ If your browser is not on the same machine as the T3 Code server, Slack's final 
 after you approve. Copy that page's full address and paste it into T3 Code to finish. If Slack
 refuses a permission when you sign in again, add it under **User Token Scopes** on your Slack
 app's **OAuth & Permissions** page.
+
+### Live updates
+
+By default T3 Code checks Slack every few minutes. With live updates, Slack sends changes to your
+conversations as they happen, and they show within seconds. Under **Settings → Work → Live
+updates**, choose **Copy manifest**, paste it into your Slack app's **App Manifest** page, and
+save. That turns on Socket Mode and the message and reaction events. Then, on the app's **Basic
+Information** page, generate an app-level token with the `connections:write` scope and paste it
+into T3 Code. Slack is still checked every 15 minutes in case something was missed, and if the
+connection drops, T3 Code goes back to checking every few minutes until it reconnects.
 
 Disconnect in **Settings → Work**. Disconnecting also revokes the token in Slack. To start a fresh
 inbox, choose **Reset Slack inbox** from the **…** menu on the Work page. This clears threads you

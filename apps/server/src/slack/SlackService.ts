@@ -46,6 +46,7 @@ import {
   type SlackConnectInput,
   type SlackConnection,
   type SlackMember,
+  SlackMention,
   type SlackMessage,
   type SlackReaction,
   type SlackSetReactionInput,
@@ -55,6 +56,8 @@ import {
   type SlackSetConversationWaitInput,
   type SlackSetReplyDraftInput,
   type SlackSendReplyInput,
+  type SlackSetAppTokenInput,
+  type SlackEvents,
   type SlackChannel,
   type SlackPullRequest,
   type SlackState,
@@ -83,6 +86,9 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
 import * as HttpRouter from "effect/unstable/http/HttpRouter";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
+import * as Socket from "effect/unstable/socket/Socket";
+
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
@@ -123,6 +129,26 @@ import {
   slackSearchMatchThread,
   summarizeSlackConversation,
 } from "./slackConversations.ts";
+import {
+  SLACK_MENTION_FIRST_DELAY_MS,
+  SLACK_MENTION_INTERVAL_MS,
+  SLACK_MENTION_MAX_PAGES,
+  SLACK_MENTION_MINE_MAX_PAGES,
+  SLACK_MENTION_WINDOW_MS,
+  type SlackApiMentionMatch,
+  slackMentionHit,
+  type SlackMentionHit,
+  unansweredSlackMentions,
+} from "./slackMentions.ts";
+import {
+  SLACK_EVENT_DEBOUNCE_MS,
+  SLACK_EVENT_SEARCH_DELAY_MS,
+  SLACK_EVENTS_RECONCILE_MS,
+  type SlackApiEvent,
+  slackEventTarget,
+  slackSocketErrorIsFinal,
+} from "./slackEvents.ts";
+import { runSlackSocket } from "./SlackSocket.ts";
 import { GITHUB_QUEUE_INTERVAL_MS, githubQueueQuery, parseGitHubQueue } from "./githubQueue.ts";
 import { slackMentionedUserIds, slackMrkdwnToMarkdown, standardEmoji } from "./slackMrkdwn.ts";
 import { SlackRateLimiter, type SlackCallPriority } from "./slackRateLimiter.ts";
@@ -138,6 +164,8 @@ const INCLUDED_CHANNELS_SECRET = "slack-included-channels";
 const INBOX_START_SECRET = "slack-inbox-start";
 /** `{ apiKey, orgId, name }` for Devin's API. */
 const DEVIN_SECRET = "devin-api";
+/** The Slack app-level token (`xapp-…`) that opens Socket Mode connections. */
+const APP_TOKEN_SECRET = "slack-app-token";
 /** Marked-done threads are remembered this long after being marked. */
 const DISMISSED_RETENTION_MS = 30 * 24 * 60 * 60_000;
 const CONVERSATIONS_LIMIT = 100;
@@ -464,6 +492,8 @@ export class SlackService extends Context.Service<
     ) => Effect.Effect<void, SlackError>;
     /** Workspace members, cached; who a T3 thread can be assigned to. */
     readonly listMembers: Effect.Effect<ReadonlyArray<SlackMember>, SlackError>;
+    /** Saves or removes the app-level token for live events over Socket Mode. */
+    readonly setAppToken: (input: SlackSetAppTokenInput) => Effect.Effect<void, SlackError>;
     readonly devinConnect: (input: DevinConnectInput) => Effect.Effect<DevinConnection, SlackError>;
     readonly devinDisconnect: Effect.Effect<void>;
   }
@@ -506,6 +536,7 @@ const encodeThreads = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Slack
 const encodePullRequests = Schema.encodeSync(
   Schema.fromJsonString(Schema.Array(WorkGitHubPullRequest)),
 );
+const encodeMentions = Schema.encodeSync(Schema.fromJsonString(Schema.Array(SlackMention)));
 /** Reads mostly return what we already have; only a real change is published. */
 function sameThreads(left: ReadonlyArray<SlackThread>, right: ReadonlyArray<SlackThread>) {
   return left.length === right.length && encodeThreads(left) === encodeThreads(right);
@@ -516,6 +547,7 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const crypto = yield* Crypto.Crypto;
   const github = yield* GitHubCli.GitHubCli;
+  const webSocket = yield* Socket.WebSocketConstructor;
   const layerScope = yield* Scope.Scope;
   const limiter = new SlackRateLimiter();
 
@@ -528,6 +560,8 @@ const make = Effect.gen(function* () {
 
   const channels = new Map<string, ChannelState>();
   const users = new Map<string, { readonly name: string; readonly avatarUrl?: string }>();
+  /** Whether a user is an app, for the ones looked up since start; mentions by apps don't count. */
+  const appUsers = new Map<string, boolean>();
   /** Custom emoji name to image URL, or `alias:<name>`. */
   let customEmoji = new Map<string, string>();
   let channelsListedAt = 0;
@@ -590,6 +624,26 @@ const make = Effect.gen(function* () {
     { readonly state?: SlackPullRequest["state"]; readonly checkedAt: number }
   >();
   let pullRequestsScannedAt = 0;
+  /** Messages that tag you, and your own, from the last search; `mineSince` bounds the latter. */
+  let mentionHits: ReadonlyArray<SlackMentionHit> = [];
+  let myHits: ReadonlyArray<SlackMentionHit> = [];
+  let mineSince: string | undefined;
+  let mentionsSearchedAt = 0;
+  /** `channel:ts` of messages you reacted to, from the last `reactions.list`. */
+  let reactedKeys = new Set<string>();
+  /** Each unanswered mention's conversation root by `channel:ts`, and the mention by its ts. */
+  const mentionRoots = new Map<string, SlackThread>();
+  const mentionMessages = new Map<string, SlackMessage>();
+  let appToken: string | undefined;
+  let eventsStatus: SlackEvents["status"] = "off";
+  let eventsError: string | undefined;
+  let eventsFiber: Fiber.Fiber<void> | undefined;
+  /**
+   * With events arriving, a read happens because something changed; the polling schedule only
+   * reconciles, every {@link SLACK_EVENTS_RECONCILE_MS} at most.
+   */
+  const reconcileDelay = (ms: number) =>
+    eventsStatus === "live" ? Math.max(ms, SLACK_EVENTS_RECONCILE_MS) : ms;
 
   /** A conversation with the PRs Devin reported and each Devin session's state. */
   const conversationThread = (entry: ConversationEntry): SlackThread => {
@@ -657,6 +711,26 @@ const make = Effect.gen(function* () {
     };
   };
 
+  const unanswered = () =>
+    connection
+      ? unansweredSlackMentions({
+          mentions: mentionHits,
+          mine: myHits,
+          reacted: reactedKeys,
+          me: connection.userId,
+          mineSince,
+        }).filter((hit) => slackTsToMs(hit.messageTs) > inboxStartedAtMs)
+      : [];
+
+  const currentMentions = (): SlackMention[] =>
+    unanswered().flatMap((hit) => {
+      const thread = mentionRoots.get(conversationKey(hit));
+      const message = mentionMessages.get(`${hit.channelId}:${hit.messageTs}`);
+      return thread && message
+        ? [{ thread: withPullRequestStates(thread), message, permalink: hit.permalink }]
+        : [];
+    });
+
   const snapshot = (now: number): SlackState => {
     const rateLimitedUntil = limiter.pausedUntilMs(now);
     const connectionState: SlackConnection = authorization
@@ -705,6 +779,7 @@ const make = Effect.gen(function* () {
             .map(withPullRequestStates)
         : [],
       conversations: connection ? visibleConversations().map(withPullRequestStates) : [],
+      mentions: connection ? currentMentions() : [],
       dismissed: connection ? dismissed : [],
       conversationOwners: connection ? conversationOwners : [],
       conversationWaits: connection ? conversationWaits : [],
@@ -722,6 +797,10 @@ const make = Effect.gen(function* () {
             ...(devinError ? { error: devinError } : {}),
           }
         : { status: "disconnected", ...(devinError ? { error: devinError } : {}) },
+      events: {
+        status: appToken && connection ? eventsStatus : "off",
+        ...(appToken && connection && eventsError ? { error: eventsError } : {}),
+      },
     };
   };
 
@@ -1076,6 +1155,7 @@ const make = Effect.gen(function* () {
       );
       const user = body?.user as SlackApiUser | undefined;
       if (!user) continue;
+      appUsers.set(id, user.is_bot === true || user.is_app_user === true);
       users.set(id, {
         name: userDisplayName(user),
         ...(user.profile?.image_48 ? { avatarUrl: user.profile.image_48 } : {}),
@@ -1241,7 +1321,8 @@ const make = Effect.gen(function* () {
       dirty = true;
     }
     channel.synced = true;
-    channel.nextPollAt = now + slackPollDelayMs(slackLatestActivityMs(messages), now);
+    channel.nextPollAt =
+      now + reconcileDelay(slackPollDelayMs(slackLatestActivityMs(messages), now));
     lastSyncedAt = now;
   });
 
@@ -1361,7 +1442,7 @@ const make = Effect.gen(function* () {
     // A Devin thread that is not yours is read again only when Devin writes in it again.
     entry.nextReadAt =
       entry.followed || entry.mine
-        ? now + slackConversationDelayMs(slackTsToMs(summary.latestTs), now)
+        ? now + reconcileDelay(slackConversationDelayMs(slackTsToMs(summary.latestTs), now))
         : Number.POSITIVE_INFINITY;
   });
 
@@ -1386,6 +1467,18 @@ const make = Effect.gen(function* () {
     }
     // A follow or unfollow made while this read was in flight wins; read again soon.
     if (generation !== reactionGeneration) return;
+    const reacted = new Set<string>();
+    for (const item of items) {
+      const message = item.message;
+      if (item.type !== "message" || !item.channel || !message) continue;
+      if (message.reactions?.some((reaction) => reaction.users?.includes(current.userId))) {
+        reacted.add(`${item.channel}:${message.ts}`);
+      }
+    }
+    if (reacted.size !== reactedKeys.size || [...reacted].some((key) => !reactedKeys.has(key))) {
+      reactedKeys = reacted;
+      dirty = true;
+    }
     const refs = slackFollowedRefs(items, current.userId, SLACK_FOLLOW_REACTION).filter(
       (ref) => slackTsToMs(ref.ts) > inboxStartedAtMs,
     );
@@ -1407,6 +1500,105 @@ const make = Effect.gen(function* () {
       if (latestReply && (!entry.latestTs || latestReply > entry.latestTs)) entry.nextReadAt = 0;
     }
     followedRefreshedAt = yield* Clock.currentTimeMillis;
+  });
+
+  /** Every match for a search, newest first, up to `maxPages` pages of 100. */
+  const searchMessages = Effect.fn("slack.search_messages")(function* (
+    query: string,
+    maxPages: number,
+  ) {
+    const matches: SlackApiMentionMatch[] = [];
+    let capped = false;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const body = yield* call(
+        "search.messages",
+        { query, count: "100", page: String(page), sort: "timestamp", sort_dir: "desc" },
+        "background",
+      );
+      const result = body.messages as
+        | { matches?: SlackApiMentionMatch[]; paging?: { pages?: number } }
+        | undefined;
+      matches.push(...(result?.matches ?? []));
+      const pages = result?.paging?.pages ?? 1;
+      if (page >= pages) break;
+      if (page === maxPages) capped = true;
+    }
+    return { matches, capped };
+  });
+
+  /**
+   * Finds messages that tag you and your own messages since, then reads the conversation of
+   * each one you have not answered so the Work page can show it.
+   */
+  const searchMentions = Effect.fn("slack.search_mentions")(function* () {
+    const current = connection;
+    if (!current) return;
+    const now = yield* Clock.currentTimeMillis;
+    const after = slackSearchAfterDate(Math.max(now - SLACK_MENTION_WINDOW_MS, inboxStartedAtMs));
+    const tagged = yield* searchMessages(
+      `<@${current.userId}> after:${after}`,
+      SLACK_MENTION_MAX_PAGES,
+    );
+    const mine = yield* searchMessages(
+      `from:<@${current.userId}> after:${after}`,
+      SLACK_MENTION_MINE_MAX_PAGES,
+    );
+    if (connection !== current) return;
+    const before = encodeMentions(currentMentions());
+    const hits = tagged.matches.flatMap((match) => slackMentionHit(match) ?? []);
+    // Search does not say who is an app, and apps tag people all day; ask Slack once per author.
+    for (const id of new Set(hits.flatMap((hit) => hit.userId ?? []))) {
+      if (appUsers.has(id)) continue;
+      const body = yield* call("users.info", { user: id }, "background").pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      const user = body?.user as SlackApiUser | undefined;
+      if (user) appUsers.set(id, user.is_bot === true || user.is_app_user === true);
+    }
+    if (connection !== current) return;
+    mentionHits = hits.filter(
+      (hit) => hit.userId !== undefined && appUsers.get(hit.userId) === false,
+    );
+    myHits = mine.matches.flatMap((match) => slackMentionHit(match) ?? []);
+    // Mentions older than the last of your messages read can't be judged.
+    mineSince = mine.capped ? myHits.at(-1)?.messageTs : undefined;
+    const open = unanswered();
+    const keep = new Set(open.map(conversationKey));
+    for (const key of mentionRoots.keys()) if (!keep.has(key)) mentionRoots.delete(key);
+    const keepMessages = new Set(open.map((hit) => `${hit.channelId}:${hit.messageTs}`));
+    for (const key of mentionMessages.keys()) {
+      if (!keepMessages.has(key)) mentionMessages.delete(key);
+    }
+    for (const hit of open) {
+      const messageKey = `${hit.channelId}:${hit.messageTs}`;
+      if (!mentionMessages.has(messageKey)) {
+        const [message] = yield* resolveMessages(
+          hit.channelId,
+          [{ ts: hit.messageTs, text: hit.text, ...(hit.userId ? { user: hit.userId } : {}) }],
+          "background",
+        );
+        if (message) mentionMessages.set(messageKey, message);
+      }
+      if (mentionRoots.has(conversationKey(hit))) continue;
+      // One unreadable conversation should not hide the rest.
+      const root = yield* Effect.gen(function* () {
+        const body = yield* call(
+          "conversations.replies",
+          { channel: hit.channelId, ts: hit.ts, limit: "1" },
+          "background",
+        );
+        const raw = ((body.messages as SlackApiMessage[] | undefined) ?? []).find(
+          isSlackThreadRoot,
+        );
+        if (!raw) return undefined;
+        const channel = yield* describeChannel(hit.channelId, "background");
+        const [message] = yield* resolveMessages(hit.channelId, [raw], "background");
+        return message ? toThread(message, channel) : undefined;
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (root) mentionRoots.set(conversationKey(hit), root);
+    }
+    mentionsSearchedAt = now;
+    if (encodeMentions(currentMentions()) !== before) dirty = true;
   });
 
   // ---------------------------------------------------------------------------
@@ -1679,7 +1871,7 @@ const make = Effect.gen(function* () {
       if (now - githubQueueAt >= GITHUB_QUEUE_INTERVAL_MS) {
         yield* refreshGitHubQueue();
       }
-      if (now - followedRefreshedAt >= SLACK_FOLLOWED_INTERVAL_MS) {
+      if (now - followedRefreshedAt >= reconcileDelay(SLACK_FOLLOWED_INTERVAL_MS)) {
         const refreshed = yield* Effect.exit(refreshFollowed("background"));
         if (Exit.isFailure(refreshed)) {
           // Retry in a minute; the channel feed keeps going meanwhile.
@@ -1704,6 +1896,11 @@ const make = Effect.gen(function* () {
       }
       if (devin && now - devinSessionsCheckedAt >= DEVIN_SESSIONS_INTERVAL_MS) {
         yield* Effect.exit(refreshDevinSessions());
+      }
+      if (now - mentionsSearchedAt >= reconcileDelay(SLACK_MENTION_INTERVAL_MS)) {
+        const searched = yield* Effect.exit(searchMentions());
+        // Retry in a minute; a missing permission shows through the Devin search's notice.
+        if (Exit.isFailure(searched)) mentionsSearchedAt = now - SLACK_MENTION_INTERVAL_MS + 60_000;
       }
       // Your conversations come before the channel feed; Devin threads not yet known to be
       // yours come after it, so a first search's backlog does not hold up new threads.
@@ -1762,10 +1959,11 @@ const make = Effect.gen(function* () {
         dueMine?.nextReadAt ?? Number.POSITIVE_INFINITY,
         dueCandidate?.nextReadAt ?? Number.POSITIVE_INFINITY,
         channelsListedAt + SLACK_CHANNEL_LIST_INTERVAL_MS,
-        followedRefreshedAt + SLACK_FOLLOWED_INTERVAL_MS,
+        followedRefreshedAt + reconcileDelay(SLACK_FOLLOWED_INTERVAL_MS),
         pullRequestsScannedAt + SLACK_PULL_REQUEST_INTERVAL_MS,
         githubQueueAt + GITHUB_QUEUE_INTERVAL_MS,
         devinSearchedAt + DEVIN_SEARCH_INTERVAL_MS,
+        mentionsSearchedAt + reconcileDelay(SLACK_MENTION_INTERVAL_MS),
         devin ? devinSessionsCheckedAt + DEVIN_SESSIONS_INTERVAL_MS : Number.POSITIVE_INFINITY,
       );
       yield* Effect.raceFirst(
@@ -1776,10 +1974,175 @@ const make = Effect.gen(function* () {
     }
   });
 
+  const stopEvents = Effect.suspend(() => {
+    const fiber = eventsFiber;
+    eventsFiber = undefined;
+    eventsStatus = "off";
+    eventsError = undefined;
+    return fiber ? Fiber.interrupt(fiber) : Effect.void;
+  });
+
   const stopSync = Effect.suspend(() => {
     const fiber = syncFiber;
     syncFiber = undefined;
-    return fiber ? Fiber.interrupt(fiber) : Effect.void;
+    return Effect.andThen(fiber ? Fiber.interrupt(fiber) : Effect.void, stopEvents);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Live events
+
+  /** Reads everything soon, for when events may have been missed or stop arriving. */
+  const catchUp = Effect.gen(function* () {
+    for (const channel of channels.values()) channel.nextPollAt = 0;
+    for (const entry of conversations.values()) {
+      if (entry.followed || entry.mine) entry.nextReadAt = 0;
+    }
+    followedRefreshedAt = 0;
+    mentionsSearchedAt = 0;
+    yield* Deferred.succeed(wake, undefined);
+  });
+
+  const setEventsStatus = (status: SlackEvents["status"], error?: string) =>
+    Effect.gen(function* () {
+      const wasLive = eventsStatus === "live";
+      if (eventsStatus === status && eventsError === error) return;
+      eventsStatus = status;
+      eventsError = error;
+      // Polling waited on events; without them it picks up at once.
+      if (wasLive && status !== "live") yield* catchUp;
+      yield* publish;
+    });
+
+  /** A fresh Socket Mode URL; each one connects once. */
+  const openSocketUrl = (token: string) =>
+    Effect.gen(function* () {
+      // Not `postForm`: the app token's scopes are not the user's, and must not be recorded.
+      const response = yield* httpClient.execute(
+        HttpClientRequest.post("https://slack.com/api/apps.connections.open").pipe(
+          HttpClientRequest.bearerToken(token),
+        ),
+      );
+      const body = (yield* response.json) as SlackResponse;
+      if (!body.ok || typeof body.url !== "string") {
+        return yield* slackError("events", body.error ?? "unknown_error");
+      }
+      return body.url;
+    }).pipe(
+      Effect.timeout("20 seconds"),
+      Effect.mapError((cause) =>
+        isSlackError(cause) ? cause : slackError("events", "Slack could not be reached."),
+      ),
+    );
+
+  /** Marks what an event touched to be read within {@link SLACK_EVENT_DEBOUNCE_MS}. */
+  const handleEvent = (event: SlackApiEvent) =>
+    Effect.gen(function* () {
+      const current = connection;
+      if (!current) return;
+      const target = slackEventTarget(event, current.userId);
+      if (!target) return;
+      const now = yield* Clock.currentTimeMillis;
+      const soon = now + SLACK_EVENT_DEBOUNCE_MS;
+      const searchSoon = now + SLACK_EVENT_SEARCH_DELAY_MS;
+      const conversation = conversations.get(conversationKey(target));
+      if (conversation && conversation.nextReadAt > soon) conversation.nextReadAt = soon;
+      const channel = channels.get(target.channelId);
+      const inFeed =
+        channel !== undefined &&
+        includedChannelIds.has(channel.id) &&
+        (target.kind === "message"
+          ? !target.reply || channel.threads.some((thread) => thread.ts === target.ts)
+          : channel.threads.some((thread) => thread.ts === target.ts));
+      if (channel && inFeed && channel.nextPollAt > soon) channel.nextPollAt = soon;
+      if (target.kind === "message") {
+        if (target.userId === current.userId && event.subtype === undefined && event.ts) {
+          // Your message answers mentions in its conversation now, without another search.
+          myHits = [
+            {
+              channelId: target.channelId,
+              ts: target.ts,
+              messageTs: event.ts,
+              userId: current.userId,
+              direct: target.channelId.startsWith("D"),
+              text: "",
+              permalink: "",
+            },
+            ...myHits,
+          ];
+          dirty = true;
+        } else if (target.mentionsMe) {
+          // A new mention: search once Slack has indexed it.
+          mentionsSearchedAt = Math.min(
+            mentionsSearchedAt,
+            searchSoon - reconcileDelay(SLACK_MENTION_INTERVAL_MS),
+          );
+        }
+        if (devinUser && target.userId === devinUser.userId) {
+          devinSearchedAt = Math.min(devinSearchedAt, searchSoon - DEVIN_SEARCH_INTERVAL_MS);
+        }
+      } else if (target.userId === current.userId) {
+        if (target.added) {
+          reactedKeys.add(`${target.channelId}:${target.ts}`);
+          dirty = true;
+        }
+        if (target.reaction === SLACK_FOLLOW_REACTION || !target.added) {
+          followedRefreshedAt = Math.min(
+            followedRefreshedAt,
+            soon - reconcileDelay(SLACK_FOLLOWED_INTERVAL_MS),
+          );
+        }
+      }
+      yield* Deferred.succeed(wake, undefined);
+    });
+
+  /** Keeps a Socket Mode connection open while there is a token, reconnecting as Slack asks. */
+  const eventsLoop = Effect.gen(function* () {
+    let failures = 0;
+    for (;;) {
+      const token = appToken;
+      if (!token || !connection) return;
+      if (eventsStatus !== "live") yield* setEventsStatus("connecting", eventsError);
+      const result = yield* Effect.exit(
+        openSocketUrl(token).pipe(
+          Effect.flatMap((url) =>
+            runSlackSocket(url, {
+              onHello: Effect.gen(function* () {
+                failures = 0;
+                yield* setEventsStatus("live");
+              }),
+              onEvent: handleEvent,
+            }),
+          ),
+        ),
+      );
+      if (Exit.isSuccess(result)) {
+        if (result.value === "link_disabled") {
+          return yield* setEventsStatus(
+            "failed",
+            "Socket Mode is off for this Slack app. Turn it on in the app's settings.",
+          );
+        }
+        // Slack refreshes connections every few hours; events wait for the next one.
+        continue;
+      }
+      const error = Option.getOrUndefined(Exit.findErrorOption(result));
+      const message = error && isSlackError(error) ? error.message : "The connection dropped.";
+      if (slackSocketErrorIsFinal(message)) {
+        return yield* setEventsStatus(
+          "failed",
+          `Slack did not accept the app-level token (${message}).`,
+        );
+      }
+      failures += 1;
+      yield* setEventsStatus("connecting", "Reconnecting to Slack…");
+      yield* Effect.sleep(Duration.seconds(Math.min(60, 2 ** failures)));
+    }
+  }).pipe(Effect.provideService(Socket.WebSocketConstructor, webSocket));
+
+  const startEvents = Effect.gen(function* () {
+    yield* stopEvents;
+    if (!appToken || !connection) return;
+    eventsFiber = yield* eventsLoop.pipe(Effect.forkIn(layerScope));
   });
 
   /** Starts reading Slack; `restore` first brings back what an earlier run read. */
@@ -1788,6 +2151,7 @@ const make = Effect.gen(function* () {
       yield* stopSync;
       channels.clear();
       users.clear();
+      appUsers.clear();
       customEmoji = new Map();
       channelsListedAt = 0;
       lastSyncedAt = undefined;
@@ -1808,8 +2172,19 @@ const make = Effect.gen(function* () {
       authoredPullRequests = [];
       mergedPullRequests = [];
       githubQueueAt = 0;
+      mentionHits = [];
+      myHits = [];
+      mineSince = undefined;
+      // The first mention search waits for the feed and your conversations, which share
+      // search's rate budget and matter more on a fresh start.
+      mentionsSearchedAt =
+        (yield* Clock.currentTimeMillis) - SLACK_MENTION_INTERVAL_MS + SLACK_MENTION_FIRST_DELAY_MS;
+      reactedKeys = new Set();
+      mentionRoots.clear();
+      mentionMessages.clear();
       if (restore) yield* restoreCache;
       syncFiber = yield* syncLoop.pipe(Effect.forkIn(layerScope));
+      yield* startEvents;
     });
 
   // ---------------------------------------------------------------------------
@@ -2045,6 +2420,7 @@ const make = Effect.gen(function* () {
     channelsListedAt = 0;
     githubQueueAt = 0;
     followedRefreshedAt = 0;
+    mentionsSearchedAt = 0;
     for (const channel of channels.values()) channel.nextPollAt = 0;
     yield* Deferred.succeed(wake, undefined);
   });
@@ -2141,6 +2517,8 @@ const make = Effect.gen(function* () {
       ),
     );
     reactionGeneration += 1;
+    // Reacting to a mention answers it; the next reactions read settles removals.
+    if (input.reacted) reactedKeys.add(`${input.channelId}:${input.ts}`);
     const added = () =>
       toReaction({ name: input.name, count: 1, users: [connection?.userId ?? ""] });
     // Patch the feed and your conversations now instead of waiting for the next read.
@@ -2328,7 +2706,7 @@ const make = Effect.gen(function* () {
 
   const sendReply = Effect.fn("slack.send_reply")(function* (input: SlackSendReplyInput) {
     if (!connection) return yield* slackError("send_reply", "Slack is not connected.");
-    yield* call(
+    const posted = yield* call(
       "chat.postMessage",
       { channel: input.channelId, thread_ts: input.ts, text: input.text },
       "interactive",
@@ -2342,6 +2720,22 @@ const make = Effect.gen(function* () {
           : error,
       ),
     );
+    // Your reply answers any mention in the conversation right away.
+    const postedTs = typeof posted.ts === "string" ? posted.ts : undefined;
+    if (postedTs) {
+      myHits = [
+        {
+          channelId: input.channelId,
+          ts: input.ts,
+          messageTs: postedTs,
+          userId: connection.userId,
+          direct: false,
+          text: input.text,
+          permalink: "",
+        },
+        ...myHits,
+      ];
+    }
     yield* setReplyDraft({ channelId: input.channelId, ts: input.ts, text: null, by: "you" });
     // Read the conversation back so it shows your reply and waits on the others.
     const entry = conversations.get(conversationKey(input));
@@ -2490,6 +2884,36 @@ const make = Effect.gen(function* () {
     return snapshot(yield* Clock.currentTimeMillis).devin;
   });
 
+  const setAppToken = Effect.fn("slack.set_app_token")(function* (input: SlackSetAppTokenInput) {
+    if (input.token === null) {
+      yield* secrets.remove(APP_TOKEN_SECRET).pipe(Effect.ignore);
+      appToken = undefined;
+      yield* stopEvents;
+      yield* catchUp;
+      yield* publish;
+      return;
+    }
+    if (!connection) return yield* slackError("set_app_token", "Connect Slack first.");
+    const token = input.token.trim();
+    // Opening a connection is the only check an app-level token has.
+    yield* openSocketUrl(token).pipe(
+      Effect.mapError((error) =>
+        slackError(
+          "set_app_token",
+          slackSocketErrorIsFinal(error.message)
+            ? "Slack did not accept this token. Generate an app-level token with connections:write."
+            : error.message,
+        ),
+      ),
+    );
+    yield* secrets
+      .set(APP_TOKEN_SECRET, new TextEncoder().encode(token))
+      .pipe(Effect.mapError(() => slackError("set_app_token", "Could not save the token.")));
+    appToken = token;
+    yield* startEvents;
+    yield* publish;
+  });
+
   const devinDisconnect = Effect.gen(function* () {
     yield* secrets.remove(DEVIN_SECRET).pipe(Effect.ignore);
     devin = undefined;
@@ -2541,6 +2965,11 @@ const make = Effect.gen(function* () {
     Effect.orElseSucceed(() => Option.none<StoredDevin>()),
   );
   if (Option.isSome(storedDevin)) devin = storedDevin.value;
+  const storedAppToken = yield* secrets.get(APP_TOKEN_SECRET).pipe(
+    Effect.map(Option.map((bytes) => new TextDecoder().decode(bytes).trim())),
+    Effect.orElseSucceed(() => Option.none<string>()),
+  );
+  if (Option.isSome(storedAppToken) && storedAppToken.value) appToken = storedAppToken.value;
   // What was read survives a restart; the next start picks up from it.
   yield* Effect.addFinalizer(() => saveCache);
   if (Option.isSome(stored)) {
@@ -2594,9 +3023,15 @@ const make = Effect.gen(function* () {
     getChannels,
     setChannelIncluded,
     listMembers,
+    setAppToken,
     devinConnect,
     devinDisconnect,
   });
 });
 
-export const layer = Layer.effect(SlackService, make);
+/** Without a WebSocket client, for tests that stand in for Slack's Socket Mode. */
+export const layerWithoutWebSocket = Layer.effect(SlackService, make);
+
+export const layer = layerWithoutWebSocket.pipe(
+  Layer.provide(NodeSocket.layerWebSocketConstructor),
+);

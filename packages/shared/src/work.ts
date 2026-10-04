@@ -18,6 +18,7 @@ import {
   SLACK_DONE_REACTIONS,
   type ScopedThreadRef,
   type SlackDismissedThread,
+  type SlackMention,
   type SlackThread,
   type ThreadPullRequestSnapshot,
   type WorkGitHubPullRequest,
@@ -412,6 +413,38 @@ export function ungroupedWorkChannelThreads(
 ) {
   const represented = new Set(groups.flatMap((group) => group.slackLinks.map(slackKey)));
   return threads.filter((thread) => !represented.has(slackKey(thread.permalink)));
+}
+
+/**
+ * Mentions to show as their own items: not in a conversation already on the Work page, not
+ * ignored, and not marked done since they were said.
+ */
+export function openWorkMentions(
+  mentions: ReadonlyArray<SlackMention>,
+  groups: ReadonlyArray<WorkGroup>,
+  options: {
+    readonly dismissed?: ReadonlyArray<SlackDismissedThread>;
+    readonly ignored?: ReadonlyArray<WorkItemMark>;
+  },
+): SlackMention[] {
+  const doneAt = new Map(
+    (options.dismissed ?? []).map((ref) => [
+      `${ref.channelId}:${ref.ts}`,
+      ref.at ?? Number.POSITIVE_INFINITY,
+    ]),
+  );
+  const loose = new Set(
+    ungroupedWorkChannelThreads(
+      mentions.map((mention) => mention.thread),
+      groups,
+    ),
+  );
+  return mentions.filter((mention) => {
+    if (!loose.has(mention.thread)) return false;
+    const at = doneAt.get(`${mention.thread.channelId}:${mention.thread.ts}`);
+    if (at !== undefined && at >= slackTsToMs(mention.message.ts)) return false;
+    return !workMatchesMarks(slackWorkItemKeys(mention.thread), options.ignored ?? []);
+  });
 }
 
 /**

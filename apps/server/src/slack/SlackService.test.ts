@@ -7,6 +7,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import * as Socket from "effect/unstable/socket/Socket";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
@@ -37,7 +38,11 @@ const nowTs = (offsetSeconds: number) => (Date.now() / 1000 + offsetSeconds).toF
 function fakeSlack(
   calls: Array<SlackCall>,
   rateLimited: Set<string>,
-  options: { readonly searchError?: string } = {},
+  options: {
+    readonly searchError?: string;
+    /** Replies added to the direct message thread after the test starts. */
+    readonly directReplies?: Array<unknown>;
+  } = {},
 ) {
   const root = nowTs(-600);
   const reply = nowTs(-300);
@@ -73,6 +78,7 @@ function fakeSlack(
       team: { name: "Acme" },
     },
     "auth.test": { ok: true, url: "https://acme.slack.com/", team: "Acme", user: "ada" },
+    "apps.connections.open": { ok: true, url: "wss://slack.test/link" },
     "users.conversations": {
       ok: true,
       channels: [{ id: "C1", name: "general" }],
@@ -251,6 +257,7 @@ function fakeSlack(
                           text: "look at this",
                           reply_count: 0,
                         },
+                        ...(options.directReplies ?? []),
                       ],
                     }
                   : method === "users.info"
@@ -306,6 +313,46 @@ function memorySecrets(store = new Map<string, Uint8Array>()) {
     set: (name, value) => Effect.sync(() => void store.set(name, value)),
     remove: (name) => Effect.sync(() => void store.delete(name)),
   });
+}
+
+type SocketListener = (event: Socket.WebSocketEvent) => void;
+
+/** Slack's Socket Mode: says hello on connect, then sends what the test emits. */
+function fakeSocketMode() {
+  const sockets: Array<(data: string) => void> = [];
+  const layer = Layer.succeed(Socket.WebSocketConstructor)(() => {
+    const listeners = new Map<string, Set<SocketListener>>();
+    const emit = (type: string, event: Socket.WebSocketEvent) => {
+      for (const listener of listeners.get(type) ?? []) listener(event);
+    };
+    const ws: Socket.WebSocketLike & { readyState: number } = {
+      readyState: 0,
+      addEventListener: (type, listener) => {
+        listeners.set(type, (listeners.get(type) ?? new Set()).add(listener));
+      },
+      removeEventListener: (type, listener) => listeners.get(type)?.delete(listener),
+      close: () => {
+        ws.readyState = 3;
+        emit("close", { code: 1000 });
+      },
+      send: () => {},
+    };
+    setTimeout(() => {
+      ws.readyState = 1;
+      emit("open", {});
+      emit("message", { data: '{"type":"hello"}' });
+    }, 0);
+    sockets.push((data) => emit("message", { data }));
+    return ws;
+  });
+  return {
+    layer,
+    send: (event: unknown) =>
+      // @effect-diagnostics-next-line preferSchemaOverJson:off - a canned Socket Mode frame.
+      sockets.at(-1)?.(
+        JSON.stringify({ type: "events_api", envelope_id: "e1", payload: { event } }),
+      ),
+  };
 }
 
 const waitForState = (predicate: (state: SlackState) => boolean) =>
@@ -716,6 +763,63 @@ describe("SlackService", () => {
           Layer.provide(memorySecrets(secrets)),
           Layer.provide(NodeServices.layer),
           Layer.provide(fakeGitHub),
+        ),
+      ),
+    );
+  });
+
+  it.live("reads a conversation again as soon as Slack sends an event about it", () => {
+    const calls: Array<SlackCall> = [];
+    const directReplies: Array<unknown> = [];
+    const socketMode = fakeSocketMode();
+    const secrets = new Map<string, Uint8Array>([
+      [
+        "slack-connection",
+        new TextEncoder().encode(
+          JSON.stringify({
+            clientId: "123.456",
+            accessToken: "xoxp-test",
+            teamName: "Acme",
+            teamUrl: "https://acme.slack.com/",
+            userId: "U1",
+            userName: "ada",
+          }),
+        ),
+      ],
+      ["slack-app-token", new TextEncoder().encode("xapp-1-test")],
+    ]);
+    return Effect.gen(function* () {
+      yield* waitForState(
+        (state) =>
+          state.events.status === "live" &&
+          state.conversations.some((item) => item.channelId === "D9" && !item.lastReply),
+      );
+      // While live, the conversation is not read again for 15 minutes; only the event can.
+      const replyTs = nowTs(0);
+      directReplies.push({ ts: replyTs, thread_ts: "1700000000.000100", user: "U2", text: "?" });
+      socketMode.send({
+        type: "message",
+        channel: "D9",
+        ts: replyTs,
+        thread_ts: "1700000000.000100",
+        user: "U2",
+        text: "?",
+      });
+      yield* waitForState((state) =>
+        state.conversations.some(
+          (item) => item.channelId === "D9" && item.lastReply?.ts === replyTs,
+        ),
+      );
+      const open = calls.find((call) => call.method === "apps.connections.open");
+      assert.strictEqual(open?.token, "xapp-1-test");
+    }).pipe(
+      Effect.provide(
+        SlackService.layerWithoutWebSocket.pipe(
+          Layer.provide(fakeSlack(calls, new Set(), { directReplies })),
+          Layer.provide(memorySecrets(secrets)),
+          Layer.provide(NodeServices.layer),
+          Layer.provide(fakeGitHub),
+          Layer.provide(socketMode.layer),
         ),
       ),
     );

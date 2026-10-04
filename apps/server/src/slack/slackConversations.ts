@@ -77,6 +77,15 @@ function hasContent(message: SlackApiMessage): boolean {
   return (message.text ?? "").trim().length > 0 || (message.files?.length ?? 0) > 0;
 }
 
+/**
+ * An app posting on its own, such as CI or GitHub notifications. It answers nobody, so it
+ * never decides who the conversation waits on. Your own posts through an app are still yours.
+ */
+function isAppMessage(message: SlackApiMessage, me: string): boolean {
+  if (message.user === me) return false;
+  return message.subtype === "bot_message" || (!!message.bot_id && !!message.bot_profile);
+}
+
 export interface SlackConversationSummary {
   readonly root: SlackApiMessage;
   readonly startedByMe: boolean;
@@ -112,7 +121,9 @@ export function summarizeSlackConversation(
     root.user === me || (isDevinMessage(root, devin) && (root.text ?? "").startsWith(`<@${me}>`));
   const replies = messages.filter((message) => message.ts !== root.ts && hasContent(message));
   const devinMessages = messages.filter((message) => isDevinMessage(message, devin));
-  const last = replies.at(-1);
+  const last = replies.findLast(
+    (message) => isDevinMessage(message, devin) || !isAppMessage(message, me),
+  );
   const sessionIds = devinSessionIds(devinMessages.map((message) => message.text ?? "").join(" "));
   const latestDevin = devinMessages.findLast(hasContent);
   return {

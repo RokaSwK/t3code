@@ -10,6 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildWorkGroups,
+  openWorkMentions,
   workItemKeys,
   workMatchesMarks,
   ungroupedWorkChannelThreads,
@@ -266,6 +267,37 @@ describe("buildWorkGroups with Slack conversations", () => {
       "needs",
       "Cy replied",
     ]);
+  });
+});
+
+describe("openWorkMentions", () => {
+  const mention = (channelId: string, minutesAgo: number) => {
+    const thread = conversation({
+      channelId,
+      permalink: `https://acme.slack.com/archives/${channelId}/p1790000000000100`,
+      startedByMe: false,
+    });
+    const ts = slackTs(nowMs - minutesAgo * 60_000);
+    return {
+      thread,
+      message: { ...thread, ts, markdown: "@ada can you check?" },
+      permalink: thread.permalink,
+    };
+  };
+
+  it("leaves out mentions in conversations already on the page", () => {
+    const followed = mention("C1", 5);
+    const loose = mention("C2", 5);
+    const groups = buildWorkGroups([], { conversations: [followed.thread], now: nowMs });
+    expect(openWorkMentions([followed, loose], groups, {})).toEqual([loose]);
+  });
+
+  it("hides a mention marked done after it was said, until a newer one", () => {
+    const old = mention("C2", 30);
+    const fresh = mention("C2", 5);
+    const dismissed = [{ channelId: "C2", ts: old.thread.ts, at: nowMs - 10 * 60_000 }];
+    expect(openWorkMentions([old], [], { dismissed })).toEqual([]);
+    expect(openWorkMentions([fresh], [], { dismissed })).toEqual([fresh]);
   });
 });
 
