@@ -560,7 +560,7 @@ const make = Effect.gen(function* () {
 
   const channels = new Map<string, ChannelState>();
   const users = new Map<string, { readonly name: string; readonly avatarUrl?: string }>();
-  /** Whether a user is an app, for the ones looked up since start; mentions by apps don't count. */
+  /** Whether a user is not a person (an app, Slackbot, or deactivated); their mentions don't count. */
   const appUsers = new Map<string, boolean>();
   /** Custom emoji name to image URL, or `alias:<name>`. */
   let customEmoji = new Map<string, string>();
@@ -1155,7 +1155,7 @@ const make = Effect.gen(function* () {
       );
       const user = body?.user as SlackApiUser | undefined;
       if (!user) continue;
-      appUsers.set(id, user.is_bot === true || user.is_app_user === true);
+      appUsers.set(id, !isMember(user));
       users.set(id, {
         name: userDisplayName(user),
         ...(user.profile?.image_48 ? { avatarUrl: user.profile.image_48 } : {}),
@@ -1553,7 +1553,7 @@ const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => undefined),
       );
       const user = body?.user as SlackApiUser | undefined;
-      if (user) appUsers.set(id, user.is_bot === true || user.is_app_user === true);
+      if (user) appUsers.set(id, !isMember(user));
     }
     if (connection !== current) return;
     mentionHits = hits.filter(
