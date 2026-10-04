@@ -33,10 +33,14 @@ function fakeSlack(frames: ReadonlyArray<string>) {
         sent.push(String(data));
       },
     };
+    // @effect-diagnostics-next-line globalTimers:off - a WebSocket opens on a later tick.
     setTimeout(() => {
       ws.readyState = 1;
       emit("open", {});
-      frames.forEach((data, index) => setTimeout(() => emit("message", { data }), index + 1));
+      frames.forEach((data, index) =>
+        // @effect-diagnostics-next-line globalTimers:off - frames arrive on separate ticks.
+        setTimeout(() => emit("message", { data }), index + 1),
+      );
     }, 0);
     return ws;
   });

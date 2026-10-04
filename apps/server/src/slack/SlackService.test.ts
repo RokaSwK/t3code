@@ -337,6 +337,7 @@ function fakeSocketMode() {
       },
       send: () => {},
     };
+    // @effect-diagnostics-next-line globalTimers:off - a WebSocket opens on a later tick.
     setTimeout(() => {
       ws.readyState = 1;
       emit("open", {});
