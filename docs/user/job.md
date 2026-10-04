@@ -108,8 +108,8 @@ or message other T3 threads, asking you first. It never posts in Slack itself.
 
 Choose **Work agent** at the top of the page. The first time, it starts a thread in your Work
 folder with a triage prompt ready to send; after that it opens the same thread with a prompt to
-triage again. Choose its folder in **Settings → Work → Work agent**; threads in that folder get
-the Work tools, and threads it starts elsewhere do not. Turn on **Tell the Work agent about new
+triage again. Choose its folder in **Settings → Work → Work agent**. Every thread has the Work
+tools, so any agent can read and act on your work, not only the Work agent. Turn on **Tell the Work agent about new
 items** to have it look into new **Needs me** items as they arrive, at most every 15 minutes.
 
 ## Codex and Claude apps

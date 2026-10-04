@@ -419,7 +419,7 @@ function WorkAgentSettings({ environmentId }: { readonly environmentId: Environm
       <SettingsRow
         id="work-agent-folder"
         title="Work agent folder"
-        description="Its threads can see and act on your work: Slack, Devin, and other T3 threads. Threads it starts elsewhere cannot."
+        description="Where the Work agent's thread lives. Every thread can see and act on your work: Slack, Devin, and other T3 threads."
         control={
           <Select
             value={folderId}

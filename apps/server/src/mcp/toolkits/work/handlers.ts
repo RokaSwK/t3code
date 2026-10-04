@@ -263,7 +263,7 @@ const make = Effect.gen(function* () {
   const requireWork = McpInvocationContext.requireMcpCapability("work").pipe(
     Effect.mapError(() =>
       fail(
-        "This thread has no Work access. Use the Work agent (the Work agent button on the Work page), or choose this thread's folder in Settings → Work → Work agent; it applies to threads started after that.",
+        "This thread has no Work access. Every thread started on this version has it; start a new thread or restart this one's session.",
       ),
     ),
   );

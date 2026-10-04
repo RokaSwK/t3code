@@ -1,5 +1,5 @@
 /**
- * Work tools - what the Work page shows and does, for an agent thread in a Work agent project.
+ * Work tools - what the Work page shows and does, for any agent thread.
  *
  * The agent reads the same groups the page shows (see `@t3tools/shared/work`), reads Slack
  * conversations and T3 threads in full, and acts through the same services the page uses, so
@@ -32,8 +32,7 @@ const dependencies = [
   SlackService.SlackService,
 ];
 
-const WORK_ACCESS =
-  "Needs Work access for this thread's project (Settings → Work → Work agent); without it the call fails.";
+const WORK_ACCESS = "Every thread has Work access.";
 
 export class WorkToolFailedError extends Schema.TaggedError<WorkToolFailedError>()(
   "WorkToolFailedError",
