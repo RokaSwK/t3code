@@ -51,7 +51,7 @@ be marked done; they leave when they close.
 Keyboard shortcuts work anywhere on the page outside text fields. Press **?** to see them, or
 choose **… → Keyboard shortcuts**:
 
-- **J** / **K** or **↓** / **↑**: next or previous item
+- **J** / **K**: next or previous item (**↓** / **↑** too while the list has focus)
 - **E**: done
 - **I**: ignore
 - **S**: snooze

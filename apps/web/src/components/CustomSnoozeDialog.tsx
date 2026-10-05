@@ -91,7 +91,7 @@ function CustomSnoozeDialog() {
         >
           <DialogHeader>
             <DialogTitle>Custom snooze</DialogTitle>
-            <DialogDescription>Choose when snoozed threads return to your inbox.</DialogDescription>
+            <DialogDescription>Choose when it comes back.</DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <div className="flex flex-col gap-4">

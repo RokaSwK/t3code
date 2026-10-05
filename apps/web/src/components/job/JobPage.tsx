@@ -841,13 +841,21 @@ export function JobPage() {
       };
       const handled = (() => {
         if (event.repeat && !["j", "k", "ArrowDown", "ArrowUp"].includes(event.key)) return false;
+        // Arrows move the selection only from the list, so they still scroll everywhere else.
+        const inList = target instanceof Node && listRef.current?.contains(target) === true;
         switch (event.key) {
-          case "j":
           case "ArrowDown":
+            if (!inList) return false;
+            move(1);
+            return true;
+          case "ArrowUp":
+            if (!inList) return false;
+            move(-1);
+            return true;
+          case "j":
             move(1);
             return true;
           case "k":
-          case "ArrowUp":
             move(-1);
             return true;
           case "Enter":
