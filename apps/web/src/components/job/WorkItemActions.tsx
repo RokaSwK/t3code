@@ -1,12 +1,16 @@
-import { CalendarPlusIcon, EyeOffIcon, RotateCcwIcon } from "lucide-react";
-import type { SlackThread } from "@t3tools/contracts";
+import {
+  AlarmClockIcon,
+  CalendarPlusIcon,
+  EyeOffIcon,
+  PinIcon,
+  PinOffIcon,
+  RotateCcwIcon,
+} from "lucide-react";
 import {
   usePrimarySettings,
   usePrimarySettingsAvailable,
   useUpdatePrimarySettings,
 } from "~/hooks/useSettings";
-import { appAtomRegistry } from "~/rpc/atomRegistry";
-import { primaryServerSettingsAtom } from "~/state/server";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -16,75 +20,66 @@ import {
   DialogDescription,
   DialogPanel,
 } from "../ui/dialog";
-import {
-  workItemKeys,
-  workItemTitle,
-  workMatchesMarks,
-  slackWorkItemKeys,
-  slackMessageSummary,
-  type WorkGroup,
-} from "./workGroups";
+import { workMatchesMarks } from "./workGroups";
 import { localWorkDate } from "./workRecap";
-import { showWorkUndoToast } from "./workUndo";
+import { useWorkTriage, WorkSnoozeMenu, type WorkItemRef } from "./workTriage";
+
+/** The detail panel's snooze menu, which `s` opens when the selected row is not on screen. */
+export const DETAIL_SNOOZE_MENU = "detail";
 
 /** Ignoring never marks a conversation or PR as completed. Plans are explicit and dated. */
 export function WorkItemActions({
-  group,
-  thread,
-  onIgnore,
+  item,
+  onHide,
 }: {
-  readonly group?: WorkGroup;
-  readonly thread?: SlackThread;
-  readonly onIgnore: () => void;
+  readonly item: WorkItemRef;
+  /** The item left the list: ignored or snoozed. */
+  readonly onHide: () => void;
 }) {
   const settings = usePrimarySettings();
-  const update = useUpdatePrimarySettings();
-  const available = usePrimarySettingsAvailable();
-  const keys = group ? workItemKeys(group) : thread ? slackWorkItemKeys(thread) : [];
-  const title = group
-    ? workItemTitle(group)
-    : thread
-      ? slackMessageSummary(thread.markdown) || "Work item"
-      : "Work item";
+  const triage = useWorkTriage();
   const today = localWorkDate();
   const planned = settings.workDayPlan?.date === today ? settings.workDayPlan.items : [];
-  const isPlanned = workMatchesMarks(keys, planned);
+  const isPlanned = workMatchesMarks(item.keys, planned);
+  const isPinned = workMatchesMarks(item.keys, settings.workPinnedItems ?? []);
   return (
     <div className="flex flex-wrap gap-1">
       <Button
-        disabled={!available}
+        disabled={!triage.available}
         size="xs"
         variant="ghost"
-        onClick={() =>
-          update({
-            workDayPlan: {
-              date: today,
-              items: isPlanned
-                ? planned.filter((item) => !workMatchesMarks(keys, [item]))
-                : [...planned, { keys, title, at: Date.now() }],
-            },
-          })
-        }
+        onClick={() => triage.togglePlan(item)}
       >
         <CalendarPlusIcon />
         {isPlanned ? "Remove from today" : "Plan for today"}
       </Button>
       <Button
-        disabled={!available}
+        disabled={!triage.available}
+        size="xs"
+        variant="ghost"
+        onClick={() => triage.togglePin(item)}
+      >
+        {isPinned ? <PinOffIcon /> : <PinIcon />}
+        {isPinned ? "Unpin" : "Pin"}
+      </Button>
+      <WorkSnoozeMenu
+        menuId={DETAIL_SNOOZE_MENU}
+        trigger={<Button disabled={!triage.available} size="xs" variant="ghost" />}
+        onSnooze={(until) => {
+          triage.snooze(item, until);
+          onHide();
+        }}
+      >
+        <AlarmClockIcon />
+        Snooze
+      </WorkSnoozeMenu>
+      <Button
+        disabled={!triage.available}
         size="xs"
         variant="ghost"
         onClick={() => {
-          const mark = { keys, title, at: Date.now() };
-          update({ workIgnoredItems: [...(settings.workIgnoredItems ?? []), mark] });
-          onIgnore();
-          // Settings may have changed since; undo removes only this mark from the latest.
-          showWorkUndoToast("Ignored", () =>
-            update({
-              workIgnoredItems: (
-                appAtomRegistry.get(primaryServerSettingsAtom).workIgnoredItems ?? []
-              ).filter((item) => item.at !== mark.at),
-            }),
-          );
+          triage.ignore(item);
+          onHide();
         }}
       >
         <EyeOffIcon />

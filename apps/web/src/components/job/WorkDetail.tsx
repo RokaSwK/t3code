@@ -43,6 +43,7 @@ import {
 import { SlackConversationView } from "./SlackConversationView";
 import { StartThreadFromSlackDialog } from "./StartThreadFromSlackDialog";
 import { WorkItemActions } from "./WorkItemActions";
+import { workItemOf, type WorkItemRef } from "./workTriage";
 import { showWorkUndoToast } from "./workUndo";
 import { slackTsToMs, type WorkGroup, type WorkPullRequest, type WorkThread } from "./workGroups";
 import {
@@ -272,6 +273,8 @@ function ReplyBox({
         <Textarea
           size="sm"
           aria-label="Reply in Slack"
+          // The Work page's `r` shortcut focuses this.
+          data-work-reply
           placeholder="Reply in the thread…"
           value={text}
           onChange={(event) => setText(event.target.value)}
@@ -452,6 +455,7 @@ function SlackDetail({
   cleared,
   slackUrl = thread.permalink,
   onClose,
+  item,
 }: {
   readonly environmentId: EnvironmentId;
   readonly devinAvatarUrl: string | undefined;
@@ -462,6 +466,7 @@ function SlackDetail({
   readonly group: WorkGroup | null;
   readonly cleared: boolean;
   readonly onClose: () => void;
+  readonly item: WorkItemRef;
 }) {
   const actions = useConversationActions(environmentId, thread);
   const [picking, setPicking] = useState(false);
@@ -603,7 +608,7 @@ function SlackDetail({
               <ThreadRows threads={threads} />
             </Section>
           ) : null}
-          <WorkItemActions {...(group ? { group } : { thread })} onIgnore={onClose} />
+          <WorkItemActions item={item} onHide={onClose} />
           {threadRequests.length > 0 || slackRequests.length > 0 ? (
             <Section title="Pull requests">
               <PullRequestRows threadRequests={threadRequests} slackRequests={slackRequests} />
@@ -643,10 +648,12 @@ function T3WorkDetail({
   group,
   projects,
   onClose,
+  item,
 }: {
   readonly group: WorkGroup;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly onClose: () => void;
+  readonly item: WorkItemRef;
 }) {
   const primary = group.threads[0]!;
   const project = projects.find(
@@ -664,7 +671,7 @@ function T3WorkDetail({
             <StatusLine group={group} />
           </div>
           <Section title="Threads">
-            <WorkItemActions group={group} onIgnore={onClose} />
+            <WorkItemActions item={item} onHide={onClose} />
             <ThreadRows threads={group.threads} />
           </Section>
           {group.pullRequests.length > 0 ? (
@@ -693,9 +700,11 @@ const REVIEW_LABELS = {
 function PullRequestDetail({
   group,
   onClose,
+  item,
 }: {
   readonly group: WorkGroup;
   readonly onClose: () => void;
+  readonly item: WorkItemRef;
 }) {
   const pullRequest = group.pullRequest!;
   const openPrLink = useOpenPrLink();
@@ -725,7 +734,7 @@ function PullRequestDetail({
               group.pullRequestRole === "review" ? "Waiting for your review" : "Your pull request"
             }
           >
-            <WorkItemActions group={group} onIgnore={onClose} />
+            <WorkItemActions item={item} onHide={onClose} />
             <a
               className={LINK_ROW_CLASS}
               href={pullRequest.url}
@@ -765,11 +774,14 @@ export function WorkDetail({
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly onClose: () => void;
 }) {
+  const item = workItemOf(selection);
   if (selection.kind === "pullRequest") {
-    return <PullRequestDetail group={selection.group} onClose={onClose} />;
+    return <PullRequestDetail group={selection.group} item={item} onClose={onClose} />;
   }
   if (selection.kind === "work") {
-    return <T3WorkDetail group={selection.group} projects={projects} onClose={onClose} />;
+    return (
+      <T3WorkDetail group={selection.group} projects={projects} item={item} onClose={onClose} />
+    );
   }
   if (environmentId === null) return null;
   if (selection.kind === "conversation") {
@@ -783,6 +795,7 @@ export function WorkDetail({
         group={selection.group}
         cleared={false}
         onClose={onClose}
+        item={item}
       />
     );
   }
@@ -808,6 +821,7 @@ export function WorkDetail({
         group={null}
         cleared={false}
         onClose={onClose}
+        item={item}
       />
     );
   }
@@ -829,6 +843,7 @@ export function WorkDetail({
       group={null}
       cleared={selection.cleared}
       onClose={onClose}
+      item={item}
     />
   );
 }

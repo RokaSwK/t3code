@@ -39,6 +39,29 @@ merged in the last three days are checked with the rest of your GitHub queue.
 Choose **Ignore** on an item to hide it without counting it as completed. Restore it from
 **… → Ignored work**. Linked Slack messages and GitHub PRs stay together when ignored.
 
+Choose **Snooze** to hide an item until later today (in three hours), tomorrow at 9:00, next
+Monday at 9:00, or a date you pick. It comes back on its own at that time. Until then it is listed
+under **Snoozed**, where **Unsnooze** brings it back early. Snoozing doesn't count the item as done,
+and the Work agent skips snoozed items. Choose **Pin** to keep an item at the top of its section.
+
+On a row, ⌘-click (Ctrl-click on Windows and Linux) the status dot to mark it done, or ⇧-click it
+to ignore it. Hovering a row also shows **Done** and **Snooze**. Pull requests and T3 work can't
+be marked done; they leave when they close.
+
+Keyboard shortcuts work anywhere on the page outside text fields. Press **?** to see them, or
+choose **… → Keyboard shortcuts**:
+
+- **J** / **K** or **↓** / **↑**: next or previous item
+- **E**: done
+- **I**: ignore
+- **S**: snooze
+- **P**: pin or unpin
+- **T**: plan for today
+- **F**: follow a Slack thread that isn't yours yet
+- **R**: write a reply
+- **Z**: undo the last done, ignore, or snooze
+- **/**: search
+
 ## Standups and weekly demos
 
 Open **Recap** in Work for what you finished since your last workday (Friday, on a Monday), with
@@ -112,7 +135,7 @@ thread and replaces 🕒 with ✅; PR problems wake it for your attention. **Wak
 
 The Work agent is a T3 thread that sees your work the way this page does and can act on it. It
 reads your conversations, Devin sessions, pull requests, and other T3 threads; it can follow,
-mark done, hand off, or mark waiting; it drafts Slack replies for you to send; and it can start
+mark done, snooze, hand off, or mark waiting; it drafts Slack replies for you to send; and it can start
 or message other T3 threads, asking you first. It never posts in Slack itself.
 
 Choose **Work agent** at the top of the page. The first time, it starts a thread in your Work

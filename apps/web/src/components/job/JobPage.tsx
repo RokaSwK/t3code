@@ -1,12 +1,31 @@
 import { WorkRecapDialog } from "./WorkRecapPanel";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, SlackMention, SlackState, SlackThread } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  SlackMention,
+  SlackState,
+  SlackThread,
+  WorkItemMark,
+} from "@t3tools/contracts";
+import {
+  activeWorkSnoozes,
+  nextWorkSnoozeExpiry,
+  pinnedWorkFirst,
+} from "@t3tools/shared/workTriage";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { EllipsisIcon, MessageCircleIcon, PencilLineIcon, SearchIcon, XIcon } from "lucide-react";
-import { Fragment, useCallback, useMemo, useRef, useState } from "react";
+import {
+  AlarmClockIcon,
+  EllipsisIcon,
+  MessageCircleIcon,
+  PencilLineIcon,
+  SearchIcon,
+  XIcon,
+} from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { isElectron } from "../../env";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
+import { useClientSettings } from "../../hooks/useSettings";
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
@@ -59,11 +78,16 @@ import {
   WorkGroupHeader,
   WorkRow,
   WorkRowAuthor,
+  type WorkRowAction,
   WorkStatusDot,
 } from "./workPresentation";
 import { includedWorkProjects, workRootsForEnvironment } from "./workScope";
 import { WorkScopeDialog } from "./WorkScopeDialog";
-import { WorkIgnoredDialog } from "./WorkItemActions";
+import { DETAIL_SNOOZE_MENU, WorkIgnoredDialog } from "./WorkItemActions";
+import { WorkShortcutsDialog } from "./WorkShortcutsDialog";
+import { snoozeWakeDescription } from "../Sidebar.snooze";
+import { openWorkSnoozeMenu, useWorkTriage, workDotHint, workItemOf } from "./workTriage";
+import { undoLastWorkAction } from "./workUndo";
 import { workItemKeys, workMatchesMarks, slackWorkItemKeys } from "./workGroups";
 import { buildWorkSearchIndex, workSearchMatches } from "./workSearch";
 
@@ -182,12 +206,14 @@ function JobHeaderMenu({
   onManageChannels,
   onChooseFolders,
   onShowIgnored,
+  onShowShortcuts,
 }: {
   readonly environmentId: EnvironmentId | null;
   readonly slackConnected: boolean;
   readonly onManageChannels: () => void;
   readonly onChooseFolders: () => void;
   readonly onShowIgnored: () => void;
+  readonly onShowShortcuts: () => void;
 }) {
   const navigate = useNavigate();
   const resetInbox = useAtomCommand(slackEnvironment.resetInbox, { reportFailure: false });
@@ -208,6 +234,7 @@ function JobHeaderMenu({
               <MenuItem onClick={() => setConfirmReset(true)}>Reset Slack inbox…</MenuItem>
             </>
           ) : null}
+          <MenuItem onClick={onShowShortcuts}>Keyboard shortcuts</MenuItem>
           <MenuSeparator />
           <MenuItem onClick={() => void navigate({ to: "/settings/work" })}>
             Slack and Devin settings
@@ -272,9 +299,19 @@ function useWorkList(slackState: SlackState | null) {
   const gitHubOwners = primaryEnvironmentId
     ? configs.get(primaryEnvironmentId)?.settings.workGitHubOwners
     : undefined;
-  const ignoredItems = primaryEnvironmentId
-    ? configs.get(primaryEnvironmentId)?.settings.workIgnoredItems
-    : undefined;
+  const settings = primaryEnvironmentId ? configs.get(primaryEnvironmentId)?.settings : undefined;
+  const ignoredItems = settings?.workIgnoredItems;
+  const snoozedItems = settings?.workSnoozedItems;
+  const pinnedItems = settings?.workPinnedItems;
+  // Snoozed items come back on their own: one timer for the soonest return, never polling.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const next = nextWorkSnoozeExpiry(snoozedItems ?? [], now);
+    if (next === null) return;
+    const delay = Math.min(Math.max(0, next - Date.now()), 2 ** 31 - 1);
+    const timer = setTimeout(() => setNow(Date.now()), delay);
+    return () => clearTimeout(timer);
+  }, [snoozedItems, now]);
   const groups = useMemo(
     () =>
       buildWorkGroups(shells, {
@@ -315,15 +352,22 @@ function useWorkList(slackState: SlackState | null) {
   return useMemo(() => {
     const byRecent = (left: WorkGroup, right: WorkGroup) =>
       right.updatedAt.localeCompare(left.updatedAt);
+    const snoozed = activeWorkSnoozes(snoozedItems ?? [], now).toSorted(
+      (left, right) => left.until - right.until,
+    );
+    const hidden = [...(ignoredItems ?? []), ...snoozed];
+    const pins = pinnedItems ?? [];
+    const pinnedFirst = (list: ReadonlyArray<WorkGroup>) =>
+      pinnedWorkFirst(list, workItemKeys, pins);
     const mine = groups
-      .filter((group) => !workMatchesMarks(workItemKeys(group), ignoredItems ?? []))
+      .filter((group) => !workMatchesMarks(workItemKeys(group), hidden))
       .filter((group) => group.conversation !== null || group.pullRequest !== null)
       .toSorted(byRecent);
     const included = new Set(
       includedProjects.map((project) => `${project.environmentId}:${project.id}`),
     );
     const other = groups
-      .filter((group) => !workMatchesMarks(workItemKeys(group), ignoredItems ?? []))
+      .filter((group) => !workMatchesMarks(workItemKeys(group), hidden))
       .filter(
         (group) =>
           group.conversation === null &&
@@ -338,7 +382,7 @@ function useWorkList(slackState: SlackState | null) {
     const mentions = slackConnected
       ? openWorkMentions(slackState!.mentions, groups, {
           ...(dismissed ? { dismissed } : {}),
-          ...(ignoredItems ? { ignored: ignoredItems } : {}),
+          ignored: hidden,
         })
       : [];
     // A new thread that mentions you is listed once, as the mention.
@@ -348,7 +392,7 @@ function useWorkList(slackState: SlackState | null) {
     const fresh: SlackThread[] = [];
     const cleared: SlackThread[] = [];
     for (const thread of ungroupedWorkChannelThreads(channelThreads ?? [], groups)) {
-      if (workMatchesMarks(slackWorkItemKeys(thread), ignoredItems ?? [])) continue;
+      if (workMatchesMarks(slackWorkItemKeys(thread), hidden)) continue;
       const key = `${thread.channelId}:${thread.ts}`;
       if (mentionKeys.has(key)) continue;
       if (dismissedKeys.has(key) || slackThreadDoneReason(thread) !== null) cleared.push(thread);
@@ -359,15 +403,19 @@ function useWorkList(slackState: SlackState | null) {
     return {
       slackConnected,
       includedProjects,
-      needs: yours.filter((group) => group.status === "needs"),
-      working: yours.filter((group) => group.status === "working"),
-      waiting: yours.filter((group) => group.status === "waiting"),
-      watching: mine.filter((group) => group.owner !== null && group.status !== "done"),
+      needs: pinnedFirst(yours.filter((group) => group.status === "needs")),
+      working: pinnedFirst(yours.filter((group) => group.status === "working")),
+      waiting: pinnedFirst(yours.filter((group) => group.status === "waiting")),
+      watching: pinnedFirst(
+        mine.filter((group) => group.owner !== null && group.status !== "done"),
+      ),
       done: mine.filter((group) => group.status === "done"),
-      mentions,
-      fresh,
+      mentions: pinnedWorkFirst(mentions, (mention) => slackWorkItemKeys(mention.thread), pins),
+      fresh: pinnedWorkFirst(fresh, slackWorkItemKeys, pins),
       cleared,
-      other,
+      other: pinnedFirst(other),
+      snoozed,
+      pins,
       all: [...mine, ...other],
       recapGroups: groups.filter(
         (group) =>
@@ -385,6 +433,9 @@ function useWorkList(slackState: SlackState | null) {
     slackState,
     channelThreads,
     ignoredItems,
+    snoozedItems,
+    pinnedItems,
+    now,
     dismissed,
   ]);
 }
@@ -413,12 +464,19 @@ function selectionFor(list: WorkList, id: string | null): WorkSelection | null {
   return cleared ? { kind: "new", thread: cleared, cleared: true } : null;
 }
 
+/** What every row needs to show its pin and act from the row. */
+interface RowTriage {
+  readonly pins: ReadonlyArray<WorkItemMark>;
+  readonly onAction: (id: string, action: WorkRowAction) => void;
+}
+
 function ConversationRows({
   groups,
   devinAvatarUrl,
   draftKeys,
   selectedId,
   onSelect,
+  triage,
 }: {
   readonly groups: ReadonlyArray<WorkGroup>;
   readonly devinAvatarUrl: string | undefined;
@@ -426,14 +484,22 @@ function ConversationRows({
   readonly draftKeys: ReadonlySet<string>;
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
+  readonly triage: RowTriage;
 }) {
-  return groups.map((group) =>
-    group.conversation ? (
+  return groups.map((group) => {
+    const pinned = workMatchesMarks(workItemKeys(group), triage.pins);
+    const canDone = group.conversation !== null && !group.markedDone && group.status !== "done";
+    return group.conversation ? (
       <WorkRow
         key={group.id}
         id={`c:${group.id}`}
         selected={selectedId === `c:${group.id}`}
-        glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        pinned={pinned}
+        canDone={canDone}
+        onAction={triage.onAction}
+        glyph={
+          <WorkStatusDot status={group.status} reason={group.reason} hint={workDotHint(canDone)} />
+        }
         source="slack"
         title={slackMessageSummary(group.conversation.markdown)}
         signals={
@@ -452,7 +518,11 @@ function ConversationRows({
         key={group.id}
         id={`c:${group.id}`}
         selected={selectedId === `c:${group.id}`}
-        glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        pinned={pinned}
+        onAction={triage.onAction}
+        glyph={
+          <WorkStatusDot status={group.status} reason={group.reason} hint={workDotHint(false)} />
+        }
         source="github"
         title={group.pullRequest.title}
         signals={
@@ -483,8 +553,8 @@ function ConversationRows({
         updatedAt={group.updatedAt}
         onSelect={onSelect}
       />
-    ) : null,
-  );
+    ) : null;
+  });
 }
 
 const mentionKey = (mention: SlackMention) => `${mention.message.channelId}:${mention.message.ts}`;
@@ -493,10 +563,12 @@ function MentionRows({
   mentions,
   selectedId,
   onSelect,
+  triage,
 }: {
   readonly mentions: ReadonlyArray<SlackMention>;
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
+  readonly triage: RowTriage;
 }) {
   return mentions.map((mention) => {
     const id = `m:${mentionKey(mention)}`;
@@ -505,7 +577,10 @@ function MentionRows({
         key={id}
         id={id}
         selected={selectedId === id}
-        glyph={<WorkStatusDot status="needs" reason="Mentioned you" />}
+        pinned={workMatchesMarks(slackWorkItemKeys(mention.thread), triage.pins)}
+        canDone
+        onAction={triage.onAction}
+        glyph={<WorkStatusDot status="needs" reason="Mentioned you" hint={workDotHint(true)} />}
         source="slack"
         title={slackMessageSummary(mention.message.markdown)}
         meta={<SlackMeta thread={mention.thread} author={mention.message} />}
@@ -518,12 +593,16 @@ function MentionRows({
 
 function NewThreadRows({
   threads,
+  cleared,
   selectedId,
   onSelect,
+  triage,
 }: {
   readonly threads: ReadonlyArray<SlackThread>;
+  readonly cleared: boolean;
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
+  readonly triage: RowTriage;
 }) {
   return threads.map((thread) => {
     const id = `n:${thread.channelId}:${thread.ts}`;
@@ -532,7 +611,10 @@ function NewThreadRows({
         key={id}
         id={id}
         selected={selectedId === id}
-        glyph={<WorkStatusDot status="new" />}
+        pinned={workMatchesMarks(slackWorkItemKeys(thread), triage.pins)}
+        canDone={!cleared}
+        onAction={triage.onAction}
+        glyph={<WorkStatusDot status="new" hint={workDotHint(!cleared)} />}
         source="slack"
         title={slackMessageSummary(thread.markdown)}
         signals={
@@ -556,11 +638,13 @@ function OtherWorkRows({
   projects,
   selectedId,
   onSelect,
+  triage,
 }: {
   readonly groups: ReadonlyArray<WorkGroup>;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly selectedId: string | null;
   readonly onSelect: (id: string) => void;
+  readonly triage: RowTriage;
 }) {
   return groups.map((group) => {
     const primary = group.threads[0]!;
@@ -574,7 +658,11 @@ function OtherWorkRows({
         key={group.id}
         id={`w:${group.id}`}
         selected={selectedId === `w:${group.id}`}
-        glyph={<WorkStatusDot status={group.status} reason={group.reason} />}
+        pinned={workMatchesMarks(workItemKeys(group), triage.pins)}
+        onAction={triage.onAction}
+        glyph={
+          <WorkStatusDot status={group.status} reason={group.reason} hint={workDotHint(false)} />
+        }
         source="t3"
         title={primary.title}
         signals={
@@ -670,7 +758,151 @@ export function JobPage() {
   const [choosingFolders, setChoosingFolders] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
   const [showIgnored, setShowIgnored] = useState(false);
+  const [showSnoozed, setShowSnoozed] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
+  const triage = useWorkTriage();
+  const listRef = useRef<HTMLDivElement>(null);
   const selection = selectionFor(fullList, selectedId);
+  /** Row ids in on-screen order, so keyboard moves follow what is shown. */
+  const visibleRowIds = useCallback(
+    () =>
+      Array.from(
+        listRef.current?.querySelectorAll<HTMLElement>("[data-work-row]") ?? [],
+        (row) => row.dataset.workRow ?? "",
+      ),
+    [],
+  );
+  const selectRow = useCallback((id: string | null) => {
+    setSelectedId(id);
+    if (id === null) return;
+    listRef.current
+      ?.querySelector(`[data-work-row="${CSS.escape(id)}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, []);
+  const onRowAction = useCallback(
+    (id: string, action: WorkRowAction) => {
+      const target = selectionFor(fullList, id);
+      if (!target) return;
+      const item = workItemOf(target);
+      if (action.kind === "done" && item.done === null) {
+        // Slack threads already done have nothing to do; the rest are never the user's to close.
+        if (target.kind !== "pullRequest" && target.kind !== "work") return;
+        toastManager.add({
+          type: "info",
+          title: "Only Slack threads can be marked done",
+          description: "Pull requests and T3 work leave when they close. Snooze or ignore them.",
+        });
+        return;
+      }
+      // The selected item leaves the list, so the selection moves on to the next row.
+      if (id === selectedId) {
+        const ids = visibleRowIds();
+        const index = ids.indexOf(id);
+        selectRow(index === -1 ? null : (ids[index + 1] ?? ids[index - 1] ?? null));
+      }
+      if (action.kind === "done") triage.markDone(item);
+      else if (action.kind === "ignore") triage.ignore(item);
+      else triage.snooze(item, action.until);
+    },
+    [fullList, selectedId, triage, visibleRowIds, selectRow],
+  );
+  const rowTriage = useMemo(
+    () => ({ pins: fullList.pins, onAction: onRowAction }),
+    [fullList.pins, onRowAction],
+  );
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey) return;
+      if (event.altKey) return;
+      const target = event.target;
+      // Typing, dialogs, and menus keep their keys.
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.closest(
+            "input, textarea, select, [contenteditable], [role='dialog'], [role='alertdialog'], [role='menu']",
+          ))
+      ) {
+        return;
+      }
+      const item = selection ? workItemOf(selection) : null;
+      const move = (delta: 1 | -1) => {
+        const ids = visibleRowIds();
+        if (ids.length === 0) return;
+        const index = selectedId === null ? -1 : ids.indexOf(selectedId);
+        const next =
+          index === -1
+            ? delta === 1
+              ? ids[0]
+              : ids.at(-1)
+            : ids[Math.min(ids.length - 1, Math.max(0, index + delta))];
+        selectRow(next ?? null);
+      };
+      const handled = (() => {
+        if (event.repeat && !["j", "k", "ArrowDown", "ArrowUp"].includes(event.key)) return false;
+        switch (event.key) {
+          case "j":
+          case "ArrowDown":
+            move(1);
+            return true;
+          case "k":
+          case "ArrowUp":
+            move(-1);
+            return true;
+          case "Enter":
+            // A focused row opens itself; with nothing selected, Enter opens the first row.
+            if (selectedId !== null || target instanceof HTMLButtonElement) return false;
+            move(1);
+            return true;
+          case "/":
+            searchRef.current?.focus();
+            return true;
+          case "?":
+            setShowShortcuts(true);
+            return true;
+          case "z":
+            undoLastWorkAction();
+            return true;
+        }
+        if (item === null || selectedId === null) return false;
+        switch (event.key) {
+          case "e":
+            onRowAction(selectedId, { kind: "done" });
+            return true;
+          case "i":
+            onRowAction(selectedId, { kind: "ignore" });
+            return true;
+          case "s":
+            openWorkSnoozeMenu(
+              listRef.current?.querySelector(`[data-work-row="${CSS.escape(selectedId)}"]`)
+                ? selectedId
+                : DETAIL_SNOOZE_MENU,
+            );
+            return true;
+          case "p":
+            triage.togglePin(item);
+            return true;
+          case "t":
+            triage.togglePlan(item);
+            return true;
+          case "f":
+            if (item.follow === null) return false;
+            triage.follow(item);
+            return true;
+          case "r": {
+            const reply = document.querySelector<HTMLTextAreaElement>("textarea[data-work-reply]");
+            reply?.focus();
+            return reply !== null;
+          }
+        }
+        return false;
+      })();
+      if (handled) event.preventDefault();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selection, selectedId, triage, onRowAction, visibleRowIds, selectRow]);
   const draftKeys = useMemo(
     () => new Set((state?.replyDrafts ?? []).map((draft) => `${draft.channelId}:${draft.ts}`)),
     [state?.replyDrafts],
@@ -747,10 +979,11 @@ export function JobPage() {
                 onManageChannels={() => setManagingChannels(true)}
                 onChooseFolders={() => setChoosingFolders(true)}
                 onShowIgnored={() => setShowIgnored(true)}
+                onShowShortcuts={() => setShowShortcuts(true)}
               />
             </div>
           </WorkspacePageHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto">
+          <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
             <WorkspacePageContainer width="readable" className="gap-5 px-2 sm:px-3">
               <div className="mx-3">
                 <InputGroup>
@@ -829,6 +1062,7 @@ export function JobPage() {
                         groups={groups}
                         selectedId={selectedId}
                         onSelect={setSelectedId}
+                        triage={rowTriage}
                       />
                     </section>
                   ) : null}
@@ -840,6 +1074,7 @@ export function JobPage() {
                         mentions={list.mentions}
                         selectedId={selectedId}
                         onSelect={setSelectedId}
+                        triage={rowTriage}
                       />
                     </section>
                   ) : null}
@@ -882,8 +1117,10 @@ export function JobPage() {
                         threads={
                           searching || showAllNew ? list.fresh : list.fresh.slice(0, NEW_PREVIEW)
                         }
+                        cleared={false}
                         selectedId={selectedId}
                         onSelect={setSelectedId}
+                        triage={rowTriage}
                       />
                       {!searching && list.fresh.length > NEW_PREVIEW ? (
                         <Button
@@ -903,8 +1140,10 @@ export function JobPage() {
                   {searching || showCleared ? (
                     <NewThreadRows
                       threads={list.cleared}
+                      cleared
                       selectedId={selectedId}
                       onSelect={setSelectedId}
+                      triage={rowTriage}
                     />
                   ) : null}
                 </section>
@@ -930,6 +1169,7 @@ export function JobPage() {
                       groups={list.watching}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
+                      triage={rowTriage}
                     />
                   ) : null}
                 </section>
@@ -952,8 +1192,54 @@ export function JobPage() {
                       groups={list.done}
                       selectedId={selectedId}
                       onSelect={setSelectedId}
+                      triage={rowTriage}
                     />
                   ) : null}
+                </section>
+              ) : null}
+              {!searching && list.snoozed.length > 0 ? (
+                <section className="flex flex-col">
+                  <WorkGroupHeader
+                    label="Snoozed"
+                    count={list.snoozed.length}
+                    action={
+                      <ToggleButton
+                        open={showSnoozed}
+                        onToggle={() => setShowSnoozed(!showSnoozed)}
+                      />
+                    }
+                  />
+                  {showSnoozed
+                    ? list.snoozed.map((entry) => (
+                        <div
+                          key={`${entry.at}:${entry.keys.join("|")}`}
+                          className="flex items-center gap-2 px-3 py-1.5"
+                        >
+                          <AlarmClockIcon
+                            aria-hidden
+                            className="size-3.5 shrink-0 text-muted-foreground"
+                          />
+                          <span className="min-w-0 flex-1 truncate text-sm">{entry.title}</span>
+                          <span className="shrink-0 text-2xs text-muted-foreground">
+                            Returns{" "}
+                            {snoozeWakeDescription(
+                              new Date(entry.until).toISOString(),
+                              new Date(),
+                              timestampFormat,
+                            )}
+                          </span>
+                          <Button
+                            size="xs"
+                            variant="ghost"
+                            className="-my-1"
+                            disabled={!triage.available}
+                            onClick={() => triage.unsnooze(entry.keys)}
+                          >
+                            Unsnooze
+                          </Button>
+                        </div>
+                      ))
+                    : null}
                 </section>
               ) : null}
               {!searching || list.other.length > 0 ? (
@@ -985,6 +1271,7 @@ export function JobPage() {
                         projects={projects}
                         selectedId={selectedId}
                         onSelect={setSelectedId}
+                        triage={rowTriage}
                       />
                     )
                   ) : null}
@@ -1035,6 +1322,7 @@ export function JobPage() {
         }}
       />
       <WorkIgnoredDialog open={showIgnored} onOpenChange={setShowIgnored} />
+      <WorkShortcutsDialog open={showShortcuts} onOpenChange={setShowShortcuts} />
     </SidebarInset>
   );
 }
