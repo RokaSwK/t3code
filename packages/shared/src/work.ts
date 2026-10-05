@@ -283,7 +283,9 @@ export function workMatchesMarks(
   return keys.some((key) => marked.has(key));
 }
 
-export function slackWorkItemKeys(thread: SlackThread): string[] {
+export function slackWorkItemKeys(
+  thread: Pick<SlackThread, "permalink" | "pullRequests">,
+): string[] {
   return [
     slackKey(thread.permalink),
     ...(thread.pullRequests ?? []).map((request) => `pr:${pullRequestKey(request)}`),

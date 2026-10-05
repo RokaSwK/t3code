@@ -107,6 +107,7 @@ const make = Effect.gen(function* () {
       workProjectRootIds: current.workProjectRootIds,
       workGitHubOwners: current.workGitHubOwners,
       workIgnoredItems: current.workIgnoredItems,
+      workSnoozedItems: current.workSnoozedItems,
       statuses: ["needs"],
       includeNewThreads: false,
       limit: 100,

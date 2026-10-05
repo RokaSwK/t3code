@@ -203,6 +203,10 @@
       "types": "./src/work.ts",
       "import": "./src/work.ts"
     },
+    "./workTriage": {
+      "types": "./src/workTriage.ts",
+      "import": "./src/workTriage.ts"
+    },
     "./workRecap": {
       "types": "./src/workRecap.ts",
       "import": "./src/workRecap.ts"

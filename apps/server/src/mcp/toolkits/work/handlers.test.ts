@@ -191,6 +191,38 @@ it("removes ignored work and its Slack mention from the agent overview", () => {
   expect(overview.newThreads).toEqual([]);
 });
 
+it("hides snoozed work from the agent overview until the snooze passes", () => {
+  const request = {
+    url: "https://github.com/acme/app/pull/42",
+    repository: "acme/app",
+    number: 42,
+    title: "Fix refunds",
+    isDraft: false,
+    updatedAt: "2026-09-27T11:00:00.000Z",
+  };
+  const overviewWith = (until: number) =>
+    buildWorkOverview({
+      threads: [],
+      projects: [],
+      slack: slackState({
+        threads: [conversation("C1", { pullRequests: [request] })],
+        reviewRequests: [request],
+      }),
+      workProjectRootIds: undefined,
+      workSnoozedItems: [
+        { keys: ["pr:github.com/acme/app#42"], title: "Snoozed", at: NOW - 10, until },
+      ],
+      statuses: ["needs", "working", "waiting", "watching", "done"],
+      includeNewThreads: true,
+      limit: 40,
+      now: NOW,
+    });
+  const snoozed = overviewWith(NOW + 60_000);
+  expect(snoozed.items).toEqual([]);
+  expect(snoozed.counts.needs).toBe(0);
+  expect(overviewWith(NOW).items).toHaveLength(1);
+});
+
 it("keeps ignored work hidden when a second PR mention later joins its Slack conversation", () => {
   const first = {
     url: "https://github.com/acme/app/pull/42",

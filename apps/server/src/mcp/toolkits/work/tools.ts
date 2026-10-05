@@ -217,7 +217,7 @@ const ReadT3ThreadTool = Tool.make("read_t3_thread", {
   .annotate(Tool.OpenWorld, false);
 
 const UpdateConversationTool = Tool.make("update_conversation", {
-  description: `Change where a Slack conversation stands on the Work page, only in the user's own view: follow or unfollow it (their 👀), mark it done or not, hand it to a workspace member or back to the user, or mark it as waiting on someone. ${WORK_ACCESS}`,
+  description: `Change where a Slack conversation stands on the Work page, only in the user's own view: follow or unfollow it (their 👀), mark it done or not, snooze it until a time, hand it to a workspace member or back to the user, or mark it as waiting on someone. ${WORK_ACCESS}`,
   parameters: Schema.Struct({
     permalink: SlackPermalink,
     followed: Schema.optional(Schema.Boolean),
@@ -232,6 +232,12 @@ const UpdateConversationTool = Tool.make("update_conversation", {
       Schema.NullOr(TrimmedNonEmptyString).annotate({
         description:
           "A workspace member's name the user is waiting on, such as a reviewer, or null to clear it.",
+      }),
+    ),
+    snoozeUntil: Schema.optional(
+      Schema.NullOr(Schema.String).annotate({
+        description:
+          "ISO date-time with an offset when the conversation returns to the Work page, or null to bring it back now.",
       }),
     ),
   }),

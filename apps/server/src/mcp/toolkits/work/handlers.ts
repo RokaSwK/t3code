@@ -11,6 +11,7 @@ import {
   SLACK_FOLLOW_REACTION,
   type SlackState,
   type WorkItemMark,
+  type WorkSnoozedItem,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -26,6 +27,7 @@ import {
   type WorkGroup,
   type WorkThread,
 } from "@t3tools/shared/work";
+import { activeWorkSnoozes, withWorkSnooze, withoutWorkSnooze } from "@t3tools/shared/workTriage";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -133,12 +135,18 @@ export function buildWorkOverview(input: {
   readonly workProjectRootIds: ReadonlyArray<ProjectId> | undefined;
   readonly workGitHubOwners?: ReadonlyArray<string> | undefined;
   readonly workIgnoredItems?: ReadonlyArray<WorkItemMark> | undefined;
+  /** Snoozed items are hidden like ignored ones until they return. */
+  readonly workSnoozedItems?: ReadonlyArray<WorkSnoozedItem> | undefined;
   readonly statuses: ReadonlyArray<WorkStatusName>;
   readonly includeNewThreads: boolean;
   readonly limit: number;
   readonly now: number;
 }): WorkOverviewResult {
   const slackConnected = input.slack.connection.status === "connected";
+  const hidden = [
+    ...(input.workIgnoredItems ?? []),
+    ...activeWorkSnoozes(input.workSnoozedItems ?? [], input.now),
+  ];
   const threads: WorkThread[] = input.threads.map((thread) => ({
     ...thread,
     environmentId: LOCAL_ENVIRONMENT,
@@ -180,7 +188,7 @@ export function buildWorkOverview(input: {
     ).map((project) => project.id),
   );
   const relevant = groups
-    .filter((group) => !workMatchesMarks(workItemKeys(group), input.workIgnoredItems ?? []))
+    .filter((group) => !workMatchesMarks(workItemKeys(group), hidden))
     .filter(
       (group) =>
         group.conversation !== null ||
@@ -209,10 +217,7 @@ export function buildWorkOverview(input: {
       ? ungroupedWorkChannelThreads(input.slack.threads, groups)
           .filter((thread) => {
             const key = `${thread.channelId}:${thread.ts}`;
-            return (
-              !dismissed.has(key) &&
-              !workMatchesMarks(slackWorkItemKeys(thread), input.workIgnoredItems ?? [])
-            );
+            return !dismissed.has(key) && !workMatchesMarks(slackWorkItemKeys(thread), hidden);
           })
           .slice(0, 20)
           .map((thread) => ({
@@ -226,7 +231,7 @@ export function buildWorkOverview(input: {
   const mentions = slackConnected
     ? openWorkMentions(input.slack.mentions, groups, {
         dismissed: input.slack.dismissed,
-        ...(input.workIgnoredItems ? { ignored: input.workIgnoredItems } : {}),
+        ignored: hidden,
       })
         .slice(0, 20)
         .map((mention) => ({
@@ -328,6 +333,7 @@ const make = Effect.gen(function* () {
           workProjectRootIds: current.workProjectRootIds,
           workGitHubOwners: current.workGitHubOwners,
           workIgnoredItems: current.workIgnoredItems,
+          workSnoozedItems: current.workSnoozedItems,
           statuses: input.statuses ?? ["needs", "working", "waiting", "watching"],
           includeNewThreads: input.includeNewThreads === true,
           limit: input.limit ?? WORK_OVERVIEW_LIMIT,
@@ -416,6 +422,47 @@ const make = Effect.gen(function* () {
           const member = input.waitingOn === null ? null : yield* memberNamed(input.waitingOn);
           yield* slack.setConversationWait({ ...target, member }).pipe(slackError);
           updated.push(member ? `waiting on ${member.name}` : "no longer waiting");
+        }
+        if (input.snoozeUntil !== undefined) {
+          const now = DateTime.toEpochMillis(yield* DateTime.now);
+          const until =
+            input.snoozeUntil === null
+              ? null
+              : Option.getOrUndefined(DateTime.make(input.snoozeUntil));
+          if (until === undefined) return yield* fail("Pass snoozeUntil as an ISO date-time.");
+          if (until !== null && DateTime.toEpochMillis(until) <= now) {
+            return yield* fail("snoozeUntil must be in the future.");
+          }
+          const state = yield* slack.current;
+          const known = [
+            ...state.conversations,
+            ...state.threads,
+            ...state.mentions.map((mention) => mention.thread),
+          ].find((thread) => thread.channelId === target.channelId && thread.ts === target.ts);
+          const keys = slackWorkItemKeys(known ?? { permalink: ref.url });
+          const current = yield* settings.getSettings.pipe(
+            Effect.mapError(() => fail("Could not read settings.")),
+          );
+          const snoozes = current.workSnoozedItems ?? [];
+          yield* settings
+            .updateSettings({
+              workSnoozedItems:
+                until === null
+                  ? withoutWorkSnooze(snoozes, keys, now)
+                  : withWorkSnooze(
+                      snoozes,
+                      {
+                        keys,
+                        title:
+                          (known && slackMessageSummary(known.markdown)) || "Slack conversation",
+                        at: now,
+                        until: DateTime.toEpochMillis(until),
+                      },
+                      now,
+                    ),
+            })
+            .pipe(Effect.mapError(() => fail("Could not save the snooze.")));
+          updated.push(until === null ? "unsnoozed" : `snoozed until ${DateTime.formatIso(until)}`);
         }
         return { updated };
       }),
