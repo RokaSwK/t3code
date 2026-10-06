@@ -349,7 +349,7 @@ function fakeSocketMode() {
   return {
     layer,
     send: (event: unknown) =>
-      // @effect-diagnostics-next-line preferSchemaOverJson:off - a canned Socket Mode frame.
+      // Send a canned Socket Mode frame.
       sockets.at(-1)?.(
         JSON.stringify({ type: "events_api", envelope_id: "e1", payload: { event } }),
       ),
