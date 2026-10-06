@@ -136,7 +136,6 @@ it.layer(layer)("HTML publication", (it) => {
           type: "thread.delete",
           commandId: CommandId.make("html-thread-delete"),
           threadId,
-          createdAt,
         });
         expect(yield* fs.exists(pagePath)).toBe(false);
       }),
