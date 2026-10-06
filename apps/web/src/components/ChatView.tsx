@@ -10702,7 +10702,6 @@ export default function ChatView(props: ChatViewProps) {
         key={`${activeThreadRef.environmentId}:${activeThreadRef.threadId}`}
         threadRef={activeThreadRef}
       />
-
     ) : renderedRightPanelSurface?.kind === "device" ? (
       <Suspense fallback={null}>
         <DevicePanel
@@ -11645,7 +11644,7 @@ export default function ChatView(props: ChatViewProps) {
             slackAvailable={
               isServerThread && serverConfig?.environment.capabilities.threadSlackLinks === true
             }
-              onAddDevice={addDeviceSurface}
+            onAddDevice={addDeviceSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}

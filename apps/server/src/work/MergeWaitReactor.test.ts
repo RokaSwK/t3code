@@ -110,16 +110,14 @@ const harness = Effect.gen(function* () {
     snapshot: pr().snapshot,
     stack: null,
   });
-  const shell = engine
-    .getShellSnapshot()
-    .pipe(
-      Effect.map((snapshot) => ({
-        ...snapshot,
-        threads: [...snapshot.threads, ...snapshot.archivedThreads]
-          .filter((thread) => thread.id === ID)
-          .map(presentWorkThread),
-      })),
-    );
+  const shell = engine.getShellSnapshot().pipe(
+    Effect.map((snapshot) => ({
+      ...snapshot,
+      threads: [...snapshot.threads, ...snapshot.archivedThreads]
+        .filter((thread) => thread.id === ID)
+        .map(presentWorkThread),
+    })),
+  );
   const dependencies = Layer.mergeAll(
     Layer.mock(WorkThreads)({
       getShellSnapshot: () => shell.pipe(Effect.map((snapshot) => ({ ...snapshot, projects: [] }))),

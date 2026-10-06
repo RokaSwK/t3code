@@ -103,8 +103,19 @@ function shell(overrides: Partial<SettlementShell> = {}): SettlementShell {
 
 describe("isAutoSettlementCandidate", () => {
   it("keeps a merge wait active even when age settlement is enabled", () => {
-    const waiting = shell({ waitingForMergeAt: "2026-06-01T00:00:00.000Z", latestRunCompletedAt: at(-20 * DAY_MS) });
-    expect(ThreadSettlementService.resolveAutoSettlementAt({ thread: waiting, nowMs: NOW_MS, pullRequest: null, autoSettleAfterDays: 1, autoSettleOnMerge: true })).toBeNull();
+    const waiting = shell({
+      waitingForMergeAt: "2026-06-01T00:00:00.000Z",
+      latestRunCompletedAt: at(-20 * DAY_MS),
+    });
+    expect(
+      ThreadSettlementService.resolveAutoSettlementAt({
+        thread: waiting,
+        nowMs: NOW_MS,
+        pullRequest: null,
+        autoSettleAfterDays: 1,
+        autoSettleOnMerge: true,
+      }),
+    ).toBeNull();
   });
   it("excludes overridden, pinned, blocked, and working threads", () => {
     expect(ThreadSettlementService.isAutoSettlementCandidate(shell(), NOW_MS)).toBe(true);

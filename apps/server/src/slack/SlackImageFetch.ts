@@ -1,12 +1,7 @@
 import { SlackImageUrl } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientRequest,
-  HttpServerResponse,
-} from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest, HttpServerResponse } from "effect/http";
 
 const isSlackImageUrl = Schema.is(SlackImageUrl);
 const headers = {

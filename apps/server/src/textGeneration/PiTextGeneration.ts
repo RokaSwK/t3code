@@ -53,7 +53,8 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle" | "generateStructured";
+      | "generateThreadTitle"
+      | "generateStructured";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -247,7 +248,16 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
-  const generateStructured: TextGeneration.TextGeneration["Service"]["generateStructured"] = (input) => runPiJson({ operation: "generateStructured", cwd: input.cwd, prompt: input.prompt, outputSchemaJson: input.outputSchema, modelSelection: input.modelSelection });
+  const generateStructured: TextGeneration.TextGeneration["Service"]["generateStructured"] = (
+    input,
+  ) =>
+    runPiJson({
+      operation: "generateStructured",
+      cwd: input.cwd,
+      prompt: input.prompt,
+      outputSchemaJson: input.outputSchema,
+      modelSelection: input.modelSelection,
+    });
   return {
     generateStructured,
     generateCommitMessage,

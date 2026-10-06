@@ -135,7 +135,7 @@ const make = Effect.gen(function* () {
       commandId: CommandId.make(`work-agent:nudge:${uuid}`),
       threadId: agent.id,
       messageId: MessageId.make(uuid),
-        text: workAgentNudgeMessage(fresh),
+      text: workAgentNudgeMessage(fresh),
       attachments: [],
     });
   });

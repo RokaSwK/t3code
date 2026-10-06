@@ -3,7 +3,10 @@ import type { EnvironmentId, ProviderDriverKind } from "@t3tools/contracts";
 import { cn } from "../lib/utils";
 import { useServerConfigs } from "../state/entities";
 import { ClaudeAI, OpenAI } from "./Icons";
-const PROVIDER_ICON_BY_PROVIDER: Record<string, typeof ClaudeAI> = { claudeAgent: ClaudeAI, codex: OpenAI };
+const PROVIDER_ICON_BY_PROVIDER: Record<string, typeof ClaudeAI> = {
+  claudeAgent: ClaudeAI,
+  codex: OpenAI,
+};
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 const IMPORTED_THREAD_PREFIX = "import:";

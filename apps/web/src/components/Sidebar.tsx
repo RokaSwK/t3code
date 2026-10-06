@@ -2,7 +2,11 @@ import { ThreadHoverCard, ThreadHoverCardPopup } from "./ThreadHoverCard";
 import { CollapsibleSectionHeader } from "./ui/collapsible-section-header";
 import { setThreadChangeRequestSnapshot } from "./ThreadStatusIndicators";
 import { ThreadContextDragGhost } from "./chat/ThreadContextDragGhost";
-import { dropThreadContext, endThreadContextDrag, moveThreadContextDrag as moveThreadContextDragGhost } from "./chat/threadContextDrag";
+import {
+  dropThreadContext,
+  endThreadContextDrag,
+  moveThreadContextDrag as moveThreadContextDragGhost,
+} from "./chat/threadContextDrag";
 import { discardComposerDraft } from "../lib/discardComposerDraft";
 import { readEnvironmentSupportsMergeWait } from "../state/entities";
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
@@ -1698,12 +1702,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : null;
   const importedInstanceId = importedThreadInstanceId(thread.id);
   const importBadge =
-    importedInstanceId !== null ? (
-      <ImportedThreadBadge
-        threadId={thread.id}
-        driver={null}
-      />
-    ) : null;
+    importedInstanceId !== null ? <ImportedThreadBadge threadId={thread.id} driver={null} /> : null;
   const ownerBadge = thread.owner ? (
     <Tooltip>
       <TooltipTrigger

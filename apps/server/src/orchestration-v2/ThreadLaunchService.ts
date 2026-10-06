@@ -779,7 +779,9 @@ const make = Effect.gen(function* () {
                 threadId: candidateThreadId,
                 projectId: input.projectId,
                 title: input.title,
-                ...(input.linkedSlackThreads === undefined ? {} : { linkedSlackThreads: input.linkedSlackThreads }),
+                ...(input.linkedSlackThreads === undefined
+                  ? {}
+                  : { linkedSlackThreads: input.linkedSlackThreads }),
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,

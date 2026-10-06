@@ -64,16 +64,27 @@ export const make = Effect.gen(function* () {
       seed = false;
     }
     for (;;) {
-      const events = yield* Stream.runCollect(eventsStore.read({ afterSequence: cursor, limit: PAGE_SIZE }));
+      const events = yield* Stream.runCollect(
+        eventsStore.read({ afterSequence: cursor, limit: PAGE_SIZE }),
+      );
       for (const stored of events) {
         const event = stored.event;
         if (event.type === "thread.snoozed" && event.payload.linkedSlackThreads) {
           for (const url of event.payload.linkedSlackThreads) {
             pending.set(url, event.payload.waitingForMergeAt != null ? "waiting" : "cancelled");
           }
-        } else if (["thread.unsnoozed", "thread.settled", "thread.archived", "thread.pinned", "thread.deleted"].includes(event.type) && "linkedSlackThreads" in event.payload) {
+        } else if (
+          [
+            "thread.unsnoozed",
+            "thread.settled",
+            "thread.archived",
+            "thread.pinned",
+            "thread.deleted",
+          ].includes(event.type) &&
+          "linkedSlackThreads" in event.payload
+        ) {
           for (const url of event.payload.linkedSlackThreads ?? [])
-            pending.set(url, (event.payload.settledOverride === "settled" ? "merged" : "cancelled"));
+            pending.set(url, event.payload.settledOverride === "settled" ? "merged" : "cancelled");
         }
         cursor = stored.sequence;
       }
@@ -96,7 +107,7 @@ export const make = Effect.gen(function* () {
         thread.hasPendingApprovals ||
         thread.hasPendingUserInput ||
         thread.session?.status === "running" ||
-                (thread.session?.status === "error" && thread.session.updatedAt > thread.waitingForMergeAt);
+        (thread.session?.status === "error" && thread.session.updatedAt > thread.waitingForMergeAt);
       const outcome = raisedHand ? "wake" : mergeWaitOutcome(thread.pullRequests);
       if (outcome === "waiting") continue;
       yield* engine

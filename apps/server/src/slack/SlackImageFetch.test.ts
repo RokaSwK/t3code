@@ -1,12 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import {
-  FetchHttpClient,
-  HttpClient,
-  HttpClientResponse,
-  HttpServerResponse,
-} from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientResponse, HttpServerResponse } from "effect/http";
 
 import { slackImages } from "./slackImages.ts";
 import { slackImageResponse } from "./SlackImageFetch.ts";

@@ -87,7 +87,13 @@ const makeUnsupportedTextGeneration = (): TextGeneration["Service"] => {
     generateCommitMessage: () => unsupported("generateCommitMessage"),
     generatePrContent: () => unsupported("generatePrContent"),
     generateBranchName: () => unsupported("generateBranchName"),
-    generateStructured: () => Effect.fail(new TextGenerationError({ operation: "generateStructured", detail: "This ACP provider does not support structured text generation." })),
+    generateStructured: () =>
+      Effect.fail(
+        new TextGenerationError({
+          operation: "generateStructured",
+          detail: "This ACP provider does not support structured text generation.",
+        }),
+      ),
     generateThreadTitle: () => unsupported("generateThreadTitle"),
   };
 };

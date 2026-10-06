@@ -163,7 +163,11 @@ function selectOpenCodeRuntimeTextGeneration(
         v1: v1.generateBranchName(input),
         v2: v2.generateBranchName(input),
       }),
-    generateStructured: (input) => byOpenCodeRuntime(probe.get, { v1: v1.generateStructured(input), v2: v2.generateStructured(input) }),
+    generateStructured: (input) =>
+      byOpenCodeRuntime(probe.get, {
+        v1: v1.generateStructured(input),
+        v2: v2.generateStructured(input),
+      }),
     generateThreadTitle: (input) =>
       byOpenCodeRuntime(probe.get, {
         v1: v1.generateThreadTitle(input),

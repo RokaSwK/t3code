@@ -1973,7 +1973,9 @@ const makeWsRpcLayer = (
               .enqueueCommand(
                 ThreadMessageIntake.launchThread({
                   commandId: input.commandId,
-                  ...(input.linkedSlackThreads === undefined ? {} : { linkedSlackThreads: input.linkedSlackThreads }),
+                  ...(input.linkedSlackThreads === undefined
+                    ? {}
+                    : { linkedSlackThreads: input.linkedSlackThreads }),
                   ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                   ...(input.reuseExistingThread === undefined
                     ? {}

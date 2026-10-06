@@ -201,10 +201,12 @@ const make = Effect.gen(function* () {
     let addedThreads = 0;
     let skippedThreads = 0;
     for (const project of projects) {
-      const result = yield* importer.importRecentAgentThreads(
-        { projectId: project.id, expectedWorkspaceRoot: project.workspaceRoot },
-        { titleFor },
-      ).pipe(Effect.exit);
+      const result = yield* importer
+        .importRecentAgentThreads(
+          { projectId: project.id, expectedWorkspaceRoot: project.workspaceRoot },
+          { titleFor },
+        )
+        .pipe(Effect.exit);
       if (Exit.isFailure(result)) continue;
       skippedThreads += result.value.skippedCount;
       addedThreads += result.value.importedCount;

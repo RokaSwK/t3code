@@ -422,7 +422,10 @@ export const assetRouteLayer = HttpRouter.add(
         .pipe(Effect.orElseSucceed(() => HttpServerResponse.empty({ status: 502 })));
     }
     if (asset.kind === "bytes") {
-      return HttpServerResponse.uint8Array(asset.bytes, { contentType: asset.mimeType, headers: { "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" } });
+      return HttpServerResponse.uint8Array(asset.bytes, {
+        contentType: asset.mimeType,
+        headers: { "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff" },
+      });
     }
     if (asset.kind === "github-media") {
       return yield* githubMediaResponse(asset, request.headers).pipe(
