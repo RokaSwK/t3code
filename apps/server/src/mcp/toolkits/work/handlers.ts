@@ -1,11 +1,6 @@
 import {
-  CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
-  DEFAULT_RUNTIME_MODE,
   EnvironmentId,
-  MessageId,
   type OrchestrationProjectShell,
-  type OrchestrationThreadShell,
   parseSlackThreadUrl,
   ProjectId,
   SLACK_FOLLOW_REACTION,
@@ -28,13 +23,11 @@ import {
   type WorkThread,
 } from "@t3tools/shared/work";
 import { activeWorkSnoozes, withWorkSnooze, withoutWorkSnooze } from "@t3tools/shared/workTriage";
-import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
-import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as WorkThreads from "../../../work/WorkThreads.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as SlackService from "../../../slack/SlackService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -129,7 +122,7 @@ function workItemOf(group: WorkGroup, draftOf: (key: string) => string | undefin
  * T3 work in the Work folders. Exported so it can be tested without the MCP layer.
  */
 export function buildWorkOverview(input: {
-  readonly threads: ReadonlyArray<OrchestrationThreadShell>;
+  readonly threads: ReadonlyArray<Omit<WorkThread, "environmentId">>;
   readonly projects: ReadonlyArray<OrchestrationProjectShell>;
   readonly slack: SlackState;
   readonly workProjectRootIds: ReadonlyArray<ProjectId> | undefined;
@@ -179,9 +172,9 @@ export function buildWorkOverview(input: {
         [
           LOCAL_ENVIRONMENT,
           {
-            settings: {
-              ...(input.workProjectRootIds ? { workProjectRootIds: input.workProjectRootIds } : {}),
-            },
+            settings: input.workProjectRootIds
+              ? { workProjectRootIds: input.workProjectRootIds }
+              : {},
           },
         ],
       ]),
@@ -258,13 +251,10 @@ export function buildWorkOverview(input: {
 }
 
 const make = Effect.gen(function* () {
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const snapshots = yield* WorkThreads.WorkThreads;
   const settings = yield* ServerSettings.ServerSettingsService;
   const slack = yield* SlackService.SlackService;
-  const crypto = yield* Crypto.Crypto;
 
-  const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
   // Says how to get access, where the shared capability error only says it is missing.
   const requireWork = McpInvocationContext.requireMcpCapability("work").pipe(
     Effect.mapError(() =>
@@ -276,9 +266,10 @@ const make = Effect.gen(function* () {
 
   const callerThread = Effect.gen(function* () {
     const scope = yield* McpInvocationContext.McpInvocationContext;
+    if (scope.thread === undefined) return yield* fail("Work requires a thread caller.");
     const thread = yield* snapshots
-      .getThreadShellById(scope.threadId)
-      .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationThreadShell>()));
+      .getThreadShellById(scope.thread.threadId)
+      .pipe(Effect.orElseSucceed(() => Option.none<WorkThreads.WorkThreadShell>()));
     if (Option.isNone(thread)) return yield* fail("This thread was not found.");
     return thread.value;
   });
@@ -481,86 +472,27 @@ const make = Effect.gen(function* () {
     start_t3_thread: (input) =>
       Effect.gen(function* () {
         yield* requireWork;
-        const caller = yield* callerThread;
-        const project = yield* snapshots
-          .getProjectShellById(ProjectId.make(input.projectId))
-          .pipe(Effect.mapError(() => fail("Could not read the project.")));
-        if (Option.isNone(project)) return yield* fail(`Project ${input.projectId} was not found.`);
-        const link = input.slackPermalink ? parseSlackThreadUrl(input.slackPermalink) : null;
-        if (input.slackPermalink && !link)
-          return yield* fail("Pass a Slack message or thread link.");
-        const threadId = ThreadId.make(yield* uuid);
-        const createdAt = DateTime.formatIso(yield* DateTime.now);
-        const title = cut(oneLine(input.title ?? input.prompt), 80);
-        yield* engine
-          .dispatch({
-            type: "thread.create",
-            commandId: CommandId.make(`mcp:work:thread-create:${threadId}`),
-            threadId,
-            projectId: project.value.id,
-            title,
-            modelSelection: caller.modelSelection,
-            runtimeMode: caller.runtimeMode,
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            branch: null,
-            worktreePath: null,
-            createdAt,
-            ...(link ? { linkedSlackThreads: [link.url] } : {}),
+        return yield* snapshots
+          .startThread({
+            caller: yield* callerThread,
+            projectId: ProjectId.make(input.projectId),
+            title: cut(oneLine(input.title ?? input.prompt), 80),
+            prompt: input.prompt,
+            ...(input.slackPermalink === undefined ? {} : { slackPermalink: input.slackPermalink }),
           })
-          .pipe(Effect.mapError(() => fail("Could not create the thread.")));
-        yield* engine
-          .dispatch({
-            type: "thread.turn.start",
-            commandId: CommandId.make(`mcp:work:turn-start:${threadId}`),
-            threadId,
-            message: {
-              messageId: MessageId.make(yield* uuid),
-              role: "user",
-              text: input.prompt,
-              attachments: [],
-            },
-            runtimeMode: caller.runtimeMode,
-            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-            createdAt,
-          })
-          .pipe(Effect.mapError(() => fail("Created the thread but could not start it.")));
-        return { threadId };
+          .pipe(Effect.mapError((error) => fail(error.message)));
       }),
 
     message_t3_thread: (input) =>
       Effect.gen(function* () {
         yield* requireWork;
-        const caller = yield* callerThread;
-        if (caller.id === input.threadId) {
-          return yield* fail("That is this thread. Answer here instead.");
-        }
-        const target = yield* snapshots
-          .getThreadShellById(ThreadId.make(input.threadId))
-          .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationThreadShell>()));
-        if (Option.isNone(target)) return yield* fail(`Thread ${input.threadId} was not found.`);
-        yield* engine
-          .dispatch({
-            type: "thread.turn.start",
-            commandId: CommandId.make(`mcp:work:message:${yield* uuid}`),
-            threadId: target.value.id,
-            message: {
-              messageId: MessageId.make(yield* uuid),
-              role: "user",
-              text: input.text,
-              attachments: [],
-            },
-            runtimeMode: target.value.runtimeMode ?? DEFAULT_RUNTIME_MODE,
-            interactionMode: target.value.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
-            createdAt: DateTime.formatIso(yield* DateTime.now),
+        return yield* snapshots
+          .messageThread({
+            callerId: (yield* callerThread).id,
+            threadId: ThreadId.make(input.threadId),
+            text: input.text,
           })
-          .pipe(
-            Effect.mapError(() =>
-              fail(
-                "The thread did not take the message. It may be busy; try again when it is idle.",
-              ),
-            ),
-          );
-        return { sent: true };
+          .pipe(Effect.mapError((error) => fail(error.message)));
       }),
   });
 });

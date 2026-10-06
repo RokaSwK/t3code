@@ -67,35 +67,13 @@ jobs:
           run-install: false
       - run: vp i --frozen-lockfile
       - name: Include the newest upstream nightly
-        # Personal stays on the edge: every build carries upstream's newest nightly. A merge
-        # that conflicts or fails typechecks is left out and said so in the changelog; the
-        # daily upstream sync opens an issue for it.
+        # Every Personal build must include the newest nightly; blocked merges fail visibly.
         if: matrix.track == 'personal'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -uo pipefail
-          nightly=$(gh release list --repo pingdotgg/t3code --exclude-drafts --limit 40 --json tagName --jq '[.[] | select(.tagName | test("-nightly\\."))][0].tagName')
-          test -n "$nightly" || exit 0
-          if git merge-base --is-ancestor "refs/upstream/tags/$nightly" HEAD; then
-            echo "personal already contains $nightly"
-            exit 0
-          fi
-          before=$(git rev-parse HEAD)
-          git config user.name "fork-sync[bot]"
-          git config user.email "fork-sync@users.noreply.github.com"
-          if ! git merge --no-edit -m "chore(fork): merge upstream $nightly into personal" "refs/upstream/tags/$nightly"; then
-            git merge --abort
-            echo "RELEASE_NOTE=Upstream $nightly is not in this build: merging it conflicts." >> "$GITHUB_ENV"
-            exit 0
-          fi
-          if vp i && (cd apps/desktop && npx tsc --noEmit) && (cd apps/server && npx tsc --noEmit) && (cd apps/web && npx tsc --noEmit); then
-            echo "MERGED_NIGHTLY=$nightly" >> "$GITHUB_ENV"
-          else
-            git reset -q --hard "$before"
-            vp i --frozen-lockfile
-            echo "RELEASE_NOTE=Upstream $nightly is not in this build: it fails typechecks when merged." >> "$GITHUB_ENV"
-          fi
+        run: bash .github/scripts/include-upstream-nightly.sh
+      - name: Check nightly release gate
+        run: node --test .github/scripts/include-upstream-nightly.test.cjs
       - name: Check channel behavior
         run: vp test run packages/shared/src/desktopReleaseChannels.test.ts apps/desktop/src/updates/updateChannels.test.ts scripts/fork-release-notes.test.ts
       - name: Build
@@ -152,6 +130,9 @@ jobs:
           gh release view "$tag" --json body --jq .body > "$previous" 2>/dev/null || : > "$previous"
           notes="$RUNNER_TEMP/release-notes.md"
           printf 'Version: `%s`\n\nSource: `%s`\n\n' "$RELEASE_VERSION" "$(git rev-parse HEAD)" > "$notes"
+          if [ -n "${UPSTREAM_NIGHTLY:-}" ]; then
+            printf 'Upstream nightly: `%s`\n\n' "$UPSTREAM_NIGHTLY" >> "$notes"
+          fi
           if [ "$SIGNED" = true ]; then
             printf 'Signed release. Select this track in Settings → About → Update track.\n' >> "$notes"
           else

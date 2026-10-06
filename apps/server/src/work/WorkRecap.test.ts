@@ -12,7 +12,7 @@ import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as WorkThreads from "./WorkThreads.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SlackService from "../slack/SlackService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -103,10 +103,12 @@ function dependencies(
     },
   };
   return Layer.mergeAll(
-    Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+    Layer.mock(WorkThreads.WorkThreads)({
       getShellSnapshot: () =>
         Effect.succeed({
+          schemaVersion: 2,
           snapshotSequence: 0,
+          archivedThreads: [],
           projects: [],
           threads: [],
           updatedAt: "2026-09-28T12:00:00.000Z",

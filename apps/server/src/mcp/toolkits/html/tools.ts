@@ -1,4 +1,4 @@
-import { McpCapabilityUnavailableError } from "@t3tools/contracts";
+import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import {
   HTML_RENDER_COLUMN_WIDTH,
   HTML_RENDER_LAYOUT_GUIDE,
@@ -8,19 +8,12 @@ import {
   HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
 } from "@t3tools/shared/htmlRender";
-import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/unstable/ai";
+import { Tool, Toolkit } from "effect/ai";
 
 import * as HtmlRender from "../../../htmlRender/HtmlRender.ts";
-import * as ProjectionSnapshotQuery from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as OrchestrationEngine from "../../../orchestration/Services/OrchestrationEngine.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
-
-export class HtmlToolFailedError extends Schema.TaggedError<HtmlToolFailedError>()(
-  "HtmlToolFailedError",
-  { message: Schema.String },
-) {}
 
 const Html = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(512_000)).annotate({
   description: "A complete, self-contained HTML document.",
@@ -62,7 +55,7 @@ export const HtmlPreviewTool = Tool.make("html_preview", {
       height: Schema.Int,
     }),
   }),
-  failure: Schema.Union([HtmlToolFailedError, McpCapabilityUnavailableError]),
+  failure: OrchestratorMcpFailure,
   dependencies: [McpInvocationContext.McpInvocationContext, HtmlRender.HtmlRender],
 })
   .annotate(Tool.Title, "Preview HTML")
@@ -95,13 +88,11 @@ const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
     }),
     message: Schema.String,
   }),
-  failure: Schema.Union([HtmlToolFailedError, McpCapabilityUnavailableError]),
+  failure: OrchestratorMcpFailure,
   failureMode: "return",
   dependencies: [
     McpInvocationContext.McpInvocationContext,
-    OrchestrationEngine.OrchestrationEngineService,
-    Crypto.Crypto,
-    ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+    ThreadManagementService.ThreadManagementService,
     HtmlRender.HtmlRender,
   ],
 })

@@ -7,7 +7,7 @@
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 
 import { parseSlackSocketFrame, SLACK_SOCKET_IDLE_MS, type SlackApiEvent } from "./slackEvents.ts";
 

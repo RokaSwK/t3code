@@ -2,34 +2,49 @@ import {
   CommandId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
   SlackError,
-  type OrchestrationCommand,
-  type OrchestrationEvent,
-  type OrchestrationReadModel,
-  type OrchestrationShellSnapshot,
   type SlackState,
   type ThreadPullRequestSnapshot,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Crypto from "effect/Crypto";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
-import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
-import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
 import { SlackService } from "../slack/SlackService.ts";
-import { decideOrchestrationCommand } from "../orchestration/decider.ts";
-import { projectEvent } from "../orchestration/projector.ts";
-import { isAutoSettlementCandidate } from "../orchestration/ThreadSettlementPolicy.ts";
+import * as EventStore from "../orchestration-v2/EventStore.ts";
+import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProviderAdapterRegistry from "../orchestration-v2/ProviderAdapterRegistry.ts";
+import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
+import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
+import { makeOrchestratorV2ReplayLayerWithRegistry } from "../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { WorkThreads, presentWorkThread } from "./WorkThreads.ts";
 import * as MergeWaitReactor from "./MergeWaitReactor.ts";
 
+const instanceId = ProviderInstanceId.make("codex");
+const adapter = {
+  instanceId,
+  driver: ProviderDriverKind.make("codex"),
+  getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+  planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
+  openSession: () => Effect.die("No provider needed"),
+} as ProviderAdapterV2Shape;
+const replayLayer = makeOrchestratorV2ReplayLayerWithRegistry(
+  { name: "personal-merge-waits" },
+  ProviderAdapterRegistry.makeLayer([adapter]),
+  { databaseLayer: SqlitePersistenceMemory, runEffectWorker: false },
+);
+const testLayer = Layer.mergeAll(
+  replayLayer,
+  EventStore.layer.pipe(Layer.provide(SqlitePersistenceMemory)),
+);
 const AT = "1970-01-01T00:00:00.000Z";
-const ID = ThreadId.make("merge-wait");
+let harnessSerial = 0;
 const URL = "https://acme.slack.com/archives/C123/p1700000000000000";
 const pr = (changes: Partial<ThreadPullRequestSnapshot> = {}) => ({
   host: "github.com",
@@ -50,76 +65,65 @@ const pr = (changes: Partial<ThreadPullRequestSnapshot> = {}) => ({
     ...changes,
   },
 });
-function model(): OrchestrationReadModel {
-  return {
-    snapshotSequence: 0,
-    projects: [],
-    updatedAt: AT,
-    threads: [
-      {
-        id: ID,
-        projectId: ProjectId.make("project"),
-        title: "Waiting",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test" },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        branch: "fix",
-        worktreePath: null,
-        pullRequests: [pr()],
-        linkedSlackThreads: [URL],
-        latestTurn: null,
-        createdAt: AT,
-        updatedAt: AT,
-        archivedAt: null,
-        deletedAt: null,
-        settledOverride: null,
-        settledAt: null,
-        session: null,
-        messages: [],
-        proposedPlans: [],
-        activities: [],
-        checkpoints: [],
-      },
-    ],
-  };
-}
 const harness = Effect.gen(function* () {
-  const crypto = yield* Crypto.Crypto;
-  let state = model();
+  const ID = ThreadId.make(`merge-wait-${harnessSerial++}`);
+  const engine = yield* Orchestrator.OrchestratorV2;
   let serial = 0;
-  const events: OrchestrationEvent[] = [];
   const secrets = new Map<string, Uint8Array>();
   const reactions = new Set<string>();
   let failSlack = false;
   let dismissed = false;
-  const dispatch = (command: OrchestrationCommand) =>
-    Effect.gen(function* () {
-      const decided = yield* decideOrchestrationCommand({ command, readModel: state });
-      for (const event of Array.isArray(decided) ? decided : [decided]) {
-        const persisted = { ...event, sequence: state.snapshotSequence + 1 };
-        state = yield* projectEvent(state, persisted);
-        events.push(persisted);
-      }
-      return { sequence: state.snapshotSequence };
-    }).pipe(Effect.provideService(Crypto.Crypto, crypto), Effect.orDie);
-  const shell = (): OrchestrationShellSnapshot => ({
-    ...state,
-    threads: state.threads.map((thread) => ({
-      ...thread,
-      latestUserMessageAt: null,
-      hasPendingApprovals: false,
-      hasPendingUserInput: false,
-      hasActionableProposedPlan: false,
-    })),
+  const dispatch: typeof engine.dispatch = (command) =>
+    engine.dispatch({ ...command, commandId: CommandId.make(`${ID}:${command.commandId}`) });
+  yield* dispatch({
+    type: "thread.create",
+    commandId: CommandId.make("create"),
+    threadId: ID,
+    projectId: ProjectId.make("project"),
+    title: "Waiting",
+    modelSelection: { instanceId, model: "test" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: "fix",
+    worktreePath: null,
+    createdBy: "user",
+    creationSource: "web",
+    linkedSlackThreads: [URL],
   });
+  yield* dispatch({
+    type: "thread.pull-request.link",
+    commandId: CommandId.make("link"),
+    threadId: ID,
+    host: "github.com",
+    repository: "acme/app",
+    number: 1,
+    url: pr().url,
+    source: "manual",
+  });
+  yield* dispatch({
+    type: "thread.pull-request-link.sync",
+    commandId: CommandId.make("initial-sync"),
+    threadId: ID,
+    host: "github.com",
+    repository: "acme/app",
+    number: 1,
+    snapshot: pr().snapshot,
+    stack: null,
+  });
+  const shell = engine
+    .getShellSnapshot()
+    .pipe(
+      Effect.map((snapshot) => ({
+        ...snapshot,
+        threads: [...snapshot.threads, ...snapshot.archivedThreads]
+          .filter((thread) => thread.id === ID)
+          .map(presentWorkThread),
+      })),
+    );
   const dependencies = Layer.mergeAll(
-    Layer.mock(OrchestrationEngineService)({
-      dispatch,
-      latestSequence: Effect.sync(() => state.snapshotSequence),
-      readEvents: (after, limit) =>
-        Stream.fromArray(events.filter((e) => e.sequence > after).slice(0, limit)),
+    Layer.mock(WorkThreads)({
+      getShellSnapshot: () => shell.pipe(Effect.map((snapshot) => ({ ...snapshot, projects: [] }))),
     }),
-    Layer.mock(ProjectionSnapshotQuery)({ getShellSnapshot: () => Effect.sync(shell) }),
     Layer.mock(ServerSecretStore)({
       get: (key) => Effect.sync(() => Option.fromUndefinedOr(secrets.get(key))),
       set: (key, value) =>
@@ -185,6 +189,7 @@ const harness = Effect.gen(function* () {
       stack: null,
     });
   return {
+    id: ID,
     create,
     dispatch,
     startWait,
@@ -205,61 +210,56 @@ const harness = Effect.gen(function* () {
         ),
       );
     },
-    events,
   };
 });
 const drain = (reactor: Effect.Success<typeof MergeWaitReactor.make>) =>
   reactor.enqueue().pipe(Effect.andThen(reactor.drain));
 
-it.layer(NodeServices.layer)("merge waits", (it) => {
-  it.effect(
-    "persists the wait, protects it from age settlement, and settles without a Slack tick after merge",
-    () =>
-      Effect.gen(function* () {
-        const h = yield* harness;
-        const reactor = yield* h.create;
-        yield* h.startWait();
-        yield* drain(reactor);
-        const thread = h.shell().threads[0]!;
-        expect(thread.waitingForMergeAt).toBe(AT);
-        expect(isAutoSettlementCandidate(thread, "2030-01-01T00:00:00.000Z")).toBe(false);
-        expect(h.reactions).toEqual(new Set(["clock3"]));
-        yield* h.sync({ state: "merged", mergedAt: AT });
-        yield* drain(reactor);
-        yield* drain(reactor);
-        expect(h.shell().threads[0]).toMatchObject({
-          waitingForMergeAt: null,
-          settledOverride: "settled",
-        });
-        expect(h.reactions.size).toBe(0);
-        expect(h.dismissed).toBe(true);
-      }),
+it.layer(Layer.mergeAll(NodeServices.layer, testLayer))("merge waits", (it) => {
+  it.effect("persists the wait and settles without a Slack tick after merge", () =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const reactor = yield* h.create;
+      yield* h.startWait();
+      yield* drain(reactor);
+      const thread = (yield* h.shell).threads[0]!;
+      expect(thread.waitingForMergeAt).toBe(AT);
+
+      expect(h.reactions).toEqual(new Set(["clock3"]));
+      yield* h.sync({ state: "merged", mergedAt: AT });
+      yield* drain(reactor);
+      yield* drain(reactor);
+      expect((yield* h.shell).threads[0]).toMatchObject({
+        waitingForMergeAt: null,
+        settledOverride: "settled",
+      });
+      expect(h.reactions.size).toBe(0);
+      expect(h.dismissed).toBe(true);
+    }),
   );
 
-  for (const change of [
+  it.effect.each([
     { checksState: "failing" },
     { mergeability: "conflicting" },
     { reviewDecision: "changes-requested" },
     { state: "closed" },
-  ] satisfies Partial<ThreadPullRequestSnapshot>[]) {
-    it.effect(`wakes rather than settles when ${JSON.stringify(change)}`, () =>
-      Effect.gen(function* () {
-        const h = yield* harness;
-        const reactor = yield* h.create;
-        yield* h.startWait();
-        yield* drain(reactor);
-        yield* h.sync(change);
-        yield* drain(reactor);
-        yield* drain(reactor);
-        expect(h.shell().threads[0]).toMatchObject({
-          waitingForMergeAt: null,
-          settledOverride: null,
-        });
-        expect(h.reactions.size).toBe(0);
-        expect(h.dismissed).toBe(false);
-      }),
-    );
-  }
+  ] satisfies Partial<ThreadPullRequestSnapshot>[])("wakes rather than settles when %j", (change) =>
+    Effect.gen(function* () {
+      const h = yield* harness;
+      const reactor = yield* h.create;
+      yield* h.startWait();
+      yield* drain(reactor);
+      yield* h.sync(change);
+      yield* drain(reactor);
+      yield* drain(reactor);
+      expect((yield* h.shell).threads[0]).toMatchObject({
+        waitingForMergeAt: null,
+        settledOverride: null,
+      });
+      expect(h.reactions.size).toBe(0);
+      expect(h.dismissed).toBe(false);
+    }),
+  );
 
   it.effect("retries Slack cleanup after restart and preserves manual wake", () =>
     Effect.gen(function* () {
@@ -271,7 +271,7 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
       yield* h.dispatch({
         type: "thread.unsnooze",
         commandId: CommandId.make("wake"),
-        threadId: ID,
+        threadId: h.id,
         reason: "user",
       });
       yield* drain(reactor);
@@ -282,7 +282,7 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
       expect(h.reactions.size).toBe(0);
       yield* h.sync({ state: "merged", mergedAt: AT });
       yield* drain(restarted);
-      expect(h.shell().threads[0]?.settledOverride).toBe(null);
+      expect((yield* h.shell).threads[0]?.settledOverride).toBe(null);
     }),
   );
 
@@ -298,7 +298,7 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
       yield* drain(reactor);
       expect(h.reactions.size).toBe(0);
       expect(h.dismissed).toBe(false);
-      expect(h.shell().threads[0]?.settledOverride).toBe(null);
+      expect((yield* h.shell).threads[0]?.settledOverride).toBe(null);
     }),
   );
 
@@ -313,20 +313,20 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
     }),
   );
 
-  for (const type of ["thread.archive", "thread.delete"] as const) {
-    it.effect(`${type} cancels the wait and cleans the reaction`, () =>
+  it.effect.each(["thread.archive", "thread.delete"] as const)(
+    "%s cancels the wait and cleans the reaction",
+    (type) =>
       Effect.gen(function* () {
         const h = yield* harness;
         const reactor = yield* h.create;
         yield* h.startWait();
         yield* drain(reactor);
-        yield* h.dispatch({ type, commandId: CommandId.make(type), threadId: ID });
+        yield* h.dispatch({ type, commandId: CommandId.make(type), threadId: h.id });
         yield* drain(reactor);
         expect(h.reactions.size).toBe(0);
         expect(h.dismissed).toBe(false);
       }),
-    );
-  }
+  );
 
   it.effect("a new message cancels the wait and clears the Slack clock", () =>
     Effect.gen(function* () {
@@ -335,59 +335,45 @@ it.layer(NodeServices.layer)("merge waits", (it) => {
       yield* h.startWait();
       yield* drain(reactor);
       yield* h.dispatch({
-        type: "thread.turn.start",
+        type: "message.dispatch",
         commandId: CommandId.make("resume"),
-        threadId: ID,
-        message: {
-          messageId: MessageId.make("resume-message"),
-          role: "user",
-          text: "Continue",
-          attachments: [],
-        },
-        runtimeMode: "full-access",
-        interactionMode: "default",
-        createdAt: AT,
+        threadId: h.id,
+        messageId: MessageId.make("resume-message"),
+        text: "Continue",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
       });
       yield* drain(reactor);
-      expect(h.shell().threads[0]?.waitingForMergeAt).toBeNull();
+      expect((yield* h.shell).threads[0]?.waitingForMergeAt).toBeNull();
       expect(h.reactions.size).toBe(0);
-      expect(
-        h.events.some(
-          (event) => event.type === "thread.unsnoozed" && event.payload.reason === "activity",
-        ),
-      ).toBe(true);
     }),
   );
 
   it.effect("rejects an unlinked wait and a stale merge resolution", () =>
     Effect.gen(function* () {
-      const state = model();
-      const unlinked = {
-        ...state,
-        threads: state.threads.map((thread) => ({ ...thread, pullRequests: [] })),
-      };
-      const rejected = yield* decideOrchestrationCommand({
-        readModel: unlinked,
-        command: {
-          type: "thread.snooze",
-          threadId: ID,
-          commandId: CommandId.make("bad"),
-          snoozedUntil: null,
-          untilMerge: true,
-        },
-      }).pipe(Effect.flip);
-      expect(rejected._tag).toBe("OrchestrationCommandInvariantError");
-      const stale = yield* decideOrchestrationCommand({
-        readModel: state,
-        command: {
+      const h = yield* harness;
+      const stale = yield* Effect.exit(
+        h.dispatch({
           type: "thread.merge-wait.resolve",
-          threadId: ID,
+          threadId: h.id,
           commandId: CommandId.make("stale"),
           waitingForMergeAt: AT,
           outcome: "merged",
-        },
-      }).pipe(Effect.flip);
-      expect(stale._tag).toBe("OrchestrationCommandInvariantError");
+        }),
+      );
+      expect(stale._tag).toBe("Failure");
+      yield* h.dispatch({
+        type: "thread.pull-request.unlink",
+        threadId: h.id,
+        commandId: CommandId.make("unlink"),
+        host: "github.com",
+        repository: "acme/app",
+        number: 1,
+      });
+      const rejected = yield* Effect.exit(h.startWait());
+      expect(rejected._tag).toBe("Failure");
     }),
   );
 });

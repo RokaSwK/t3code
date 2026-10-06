@@ -43,7 +43,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as ServerConfig from "../config.ts";
 import { writeFileStringAtomically } from "../atomicWrite.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as WorkThreads from "./WorkThreads.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SlackService from "../slack/SlackService.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
@@ -225,7 +225,7 @@ export function recapSummaryKey(
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const snapshots = yield* WorkThreads.WorkThreads;
   const settingsService = yield* ServerSettings.ServerSettingsService;
   const slack = yield* SlackService.SlackService;
   const environment = yield* ServerEnvironment.ServerEnvironment;

@@ -6,7 +6,7 @@ import {
   HttpClient,
   HttpClientRequest,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 
 const isSlackImageUrl = Schema.is(SlackImageUrl);
 const headers = {

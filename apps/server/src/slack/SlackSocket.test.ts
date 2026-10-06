@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as Socket from "effect/socket/Socket";
 
 import type { SlackApiEvent } from "./slackEvents.ts";
 import { runSlackSocket } from "./SlackSocket.ts";

@@ -12,6 +12,7 @@ import {
   readHtmlRenderReference,
 } from "./htmlRender.ts";
 import { T3_CODE_DARK_THEME_COLORS, T3_CODE_LIGHT_THEME_COLORS } from "./themePalettes.ts";
+import { htmlRenderFromToolItem } from "./toolOutput.ts";
 
 const reference = { attachmentId: "thread-abc-123.html", title: "Chart", height: 420 };
 
@@ -131,6 +132,33 @@ describe("readHtmlRenderReference", () => {
     expect(readHtmlRenderReference({ ...reference, title: "  " })?.title).toBe("HTML");
     expect(readHtmlRenderReference({ ...reference, attachmentId: 4 })).toBeUndefined();
     expect(readHtmlRenderReference({ ...reference, height: Number.NaN })).toBeUndefined();
+  });
+});
+
+describe("htmlRenderFromToolItem", () => {
+  const result = { htmlRender: reference, message: "Rendered above your reply." };
+
+  it("reads the reference from each provider's result envelope", () => {
+    for (const [toolName, output] of [
+      ["mcp__t3-code__html_render", [{ type: "text", text: JSON.stringify(result) }]],
+      ["t3-code.html_render", { structuredContent: result, content: [] }],
+      ["t3-code-thread_1_html_render", JSON.stringify(result)],
+      ["html_render", result],
+    ] as const) {
+      expect(htmlRenderFromToolItem({ toolName, output })).toEqual(reference);
+    }
+  });
+
+  it("ignores other tools and failed calls", () => {
+    expect(htmlRenderFromToolItem({ toolName: "mcp__t3-code__html_preview", output: result })).toBe(
+      undefined,
+    );
+    expect(htmlRenderFromToolItem({ toolName: "mcp__other__html_render", output: result })).toBe(
+      undefined,
+    );
+    expect(
+      htmlRenderFromToolItem({ toolName: "html_render", output: { ...result, isError: true } }),
+    ).toBeUndefined();
   });
 });
 

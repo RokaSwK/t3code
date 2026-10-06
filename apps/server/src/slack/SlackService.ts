@@ -71,7 +71,7 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+const encodeBase64Url = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64url");
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -81,12 +81,12 @@ import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import * as HttpClient from "effect/unstable/http/HttpClient";
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
-import * as HttpRouter from "effect/unstable/http/HttpRouter";
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse";
-import * as Socket from "effect/unstable/socket/Socket";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import * as HttpServerResponse from "effect/http/HttpServerResponse";
+import * as Socket from "effect/socket/Socket";
 
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
@@ -2386,11 +2386,11 @@ const make = Effect.gen(function* () {
   const connect = Effect.fn("slack.connect")(
     function* (input: SlackConnectInput) {
       yield* endAuthorization(false);
-      const verifier = Encoding.encodeBase64Url(yield* crypto.randomBytes(32));
-      const challenge = Encoding.encodeBase64Url(
+      const verifier = encodeBase64Url(yield* crypto.randomBytes(32));
+      const challenge = encodeBase64Url(
         yield* crypto.digest("SHA-256", new TextEncoder().encode(verifier)),
       );
-      const state = Encoding.encodeBase64Url(yield* crypto.randomBytes(16));
+      const state = encodeBase64Url(yield* crypto.randomBytes(16));
       const authorizeUrl = new URL("https://slack.com/oauth/v2/authorize");
       authorizeUrl.search = new URLSearchParams({
         client_id: input.clientId,

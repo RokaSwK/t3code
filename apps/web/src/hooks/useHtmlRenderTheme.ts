@@ -1,7 +1,7 @@
 import { HTML_RENDER_DEFAULT_FONTS, htmlRenderTheme } from "@t3tools/shared/htmlRender";
 import { useMemo, useSyncExternalStore } from "react";
 
-import { cssFontFamilies } from "../appearanceFonts";
+import { appearanceFontStack } from "../appearanceFonts";
 import {
   getStandardThemeColors,
   getThemeColorsForMode,
@@ -41,12 +41,8 @@ export function useHtmlRenderTheme() {
   return useMemo(
     () =>
       htmlRenderTheme(colors, resolvedTheme, {
-        sans: cssFontFamilies(sans)
-          ? `${cssFontFamilies(sans)}, ${HTML_RENDER_DEFAULT_FONTS.sans}`
-          : HTML_RENDER_DEFAULT_FONTS.sans,
-        mono: cssFontFamilies(mono)
-          ? `${cssFontFamilies(mono)}, ${HTML_RENDER_DEFAULT_FONTS.mono}`
-          : HTML_RENDER_DEFAULT_FONTS.mono,
+        sans: appearanceFontStack(sans, HTML_RENDER_DEFAULT_FONTS.sans),
+        mono: appearanceFontStack(mono, HTML_RENDER_DEFAULT_FONTS.mono),
       }),
     [colors, resolvedTheme, sans, mono],
   );

@@ -25,8 +25,8 @@ import * as Schema from "effect/Schema";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { buildWorkOverview } from "../mcp/toolkits/work/handlers.ts";
 import type { WorkItem } from "../mcp/toolkits/work/tools.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import * as WorkThreads from "./WorkThreads.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SlackService from "../slack/SlackService.ts";
 
@@ -71,8 +71,8 @@ export function newWorkItems(
 const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const slack = yield* SlackService.SlackService;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const snapshots = yield* WorkThreads.WorkThreads;
+  const engine = yield* ThreadManagement.ThreadManagementService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const crypto = yield* Crypto.Crypto;
 
@@ -127,19 +127,16 @@ const make = Effect.gen(function* () {
 
     lastNudgeAt = nowMs;
     const uuid = yield* crypto.randomUUIDv4;
-    yield* engine.dispatch({
-      type: "thread.turn.start",
+    yield* engine.sendToThread({
+      mode: "auto",
+      projectId: agent.projectId,
+      createdBy: "system",
+      creationSource: "server",
       commandId: CommandId.make(`work-agent:nudge:${uuid}`),
       threadId: agent.id,
-      message: {
-        messageId: MessageId.make(uuid),
-        role: "user",
+      messageId: MessageId.make(uuid),
         text: workAgentNudgeMessage(fresh),
-        attachments: [],
-      },
-      runtimeMode: agent.runtimeMode,
-      interactionMode: agent.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
-      createdAt: DateTime.formatIso(yield* DateTime.now),
+      attachments: [],
     });
   });
 

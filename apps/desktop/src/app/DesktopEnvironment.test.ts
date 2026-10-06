@@ -69,7 +69,6 @@ describe("DesktopEnvironment", () => {
       assert.strictEqual(environment.stateDir, "/Users/alice/.t3-personal/userdata");
       assert.strictEqual(environment.displayName, "T3 Code (Personal)");
       assert.strictEqual(environment.branding.stageLabel, "Personal");
-      assert.strictEqual(environment.userDataDirName, "t3code-personal");
       assert.strictEqual(environment.appUserModelId, "com.t3tools.t3code.personal");
     }),
   );

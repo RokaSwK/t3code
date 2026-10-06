@@ -9,8 +9,9 @@ import * as Stream from "effect/Stream";
 import * as Schedule from "effect/Schedule";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as EventStore from "../orchestration-v2/EventStore.ts";
+import * as WorkThreads from "./WorkThreads.ts";
 import * as SlackService from "../slack/SlackService.ts";
 import { forkParked } from "../serverActivation.ts";
 
@@ -31,13 +32,14 @@ const PAGE_SIZE = 500;
 
 /** Replays lifecycle events so reaction changes survive disconnects and server restarts. */
 export const make = Effect.gen(function* () {
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const engine = yield* Orchestrator.OrchestratorV2;
+  const snapshots = yield* WorkThreads.WorkThreads;
+  const eventsStore = yield* EventStore.EventStoreV2;
   const slack = yield* SlackService.SlackService;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const stored = yield* secrets.get(JOURNAL_KEY);
   const initial = Option.isSome(stored) ? decode(new TextDecoder().decode(stored.value)) : null;
-  let cursor = initial?.cursor ?? (yield* engine.latestSequence);
+  let cursor = initial?.cursor ?? (yield* eventsStore.latestSequence());
   const pending = new Map(initial?.pending.map((job) => [job.url, job.state]));
   let seed = initial === null;
   const save = () =>
@@ -62,17 +64,18 @@ export const make = Effect.gen(function* () {
       seed = false;
     }
     for (;;) {
-      const events = yield* Stream.runCollect(engine.readEvents(cursor, PAGE_SIZE));
-      for (const event of events) {
+      const events = yield* Stream.runCollect(eventsStore.read({ afterSequence: cursor, limit: PAGE_SIZE }));
+      for (const stored of events) {
+        const event = stored.event;
         if (event.type === "thread.snoozed" && event.payload.linkedSlackThreads) {
           for (const url of event.payload.linkedSlackThreads) {
             pending.set(url, event.payload.waitingForMergeAt != null ? "waiting" : "cancelled");
           }
-        } else if (event.type === "thread.unsnoozed" && event.payload.mergeWait) {
+        } else if (["thread.unsnoozed", "thread.settled", "thread.archived", "thread.pinned", "thread.deleted"].includes(event.type) && "linkedSlackThreads" in event.payload) {
           for (const url of event.payload.linkedSlackThreads ?? [])
-            pending.set(url, event.payload.mergeWait);
+            pending.set(url, (event.payload.settledOverride === "settled" ? "merged" : "cancelled"));
         }
-        cursor = event.sequence;
+        cursor = stored.sequence;
       }
       if (events.length < PAGE_SIZE) break;
     }
@@ -93,8 +96,7 @@ export const make = Effect.gen(function* () {
         thread.hasPendingApprovals ||
         thread.hasPendingUserInput ||
         thread.session?.status === "running" ||
-        thread.session?.status === "starting" ||
-        (thread.session?.status === "error" && thread.session.updatedAt > thread.waitingForMergeAt);
+                (thread.session?.status === "error" && thread.session.updatedAt > thread.waitingForMergeAt);
       const outcome = raisedHand ? "wake" : mergeWaitOutcome(thread.pullRequests);
       if (outcome === "waiting") continue;
       yield* engine
@@ -153,7 +155,7 @@ export const make = Effect.gen(function* () {
       ),
   });
   const start = Effect.gen(function* () {
-    const events = yield* engine.subscribeDomainEvents;
+    const events = engine.streamDomainEvents;
     yield* forkParked(
       Stream.runForEach(events, (event) =>
         [
@@ -162,7 +164,11 @@ export const make = Effect.gen(function* () {
           "thread.pull-request-linked",
           "thread.pull-request-synced",
           "thread.pull-request-unlinked",
-          "thread.session-set",
+          "run.updated",
+          "thread.settled",
+          "thread.archived",
+          "thread.pinned",
+          "thread.deleted",
         ].includes(event.type)
           ? worker.enqueue("merge-waits", true)
           : Effect.void,

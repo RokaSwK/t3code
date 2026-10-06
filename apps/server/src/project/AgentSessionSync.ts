@@ -38,14 +38,12 @@ import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ServerConfig from "../config.ts";
-import { normalizeDispatchCommand } from "../orchestration/Normalizer.ts";
-import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as ProviderSessionDirectory from "../provider/Services/ProviderSessionDirectory.ts";
+import * as ProjectService from "./ProjectService.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as AgentSessionImporter from "./AgentSessionImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import * as AgentSessionScanner from "./AgentSessionScanner.ts";
-import { importRecentAgentThreads } from "./AgentSessionImporter.ts";
 
 /** The first pass waits for startup to settle; later ones pick up new sessions. */
 const FIRST_PASS_DELAY = Duration.minutes(1);
@@ -112,9 +110,9 @@ export function parseAgentAppTitles(input: {
 
 const make = Effect.gen(function* () {
   const scanner = yield* AgentSessionScanner.AgentSessionScanner;
-  const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const engine = yield* OrchestrationEngine.OrchestrationEngineService;
-  const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+  const projectService = yield* ProjectService.ProjectService;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
+  const importer = yield* AgentSessionImporter.AgentSessionImporter;
   const settings = yield* ServerSettings.ServerSettingsService;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -154,12 +152,6 @@ const make = Effect.gen(function* () {
     });
   });
 
-  const importedThreadIds = (projectId: ProjectId) =>
-    snapshots.getImportedAgentSessionSources(projectId).pipe(
-      Effect.map((sources) => new Set<ThreadId>(sources.map((entry) => entry.threadId))),
-      Effect.orElseSucceed(() => new Set<ThreadId>()),
-    );
-
   const pass = Effect.gen(function* () {
     const scan = yield* scanner.scan;
     const now = yield* DateTime.now;
@@ -174,17 +166,14 @@ const make = Effect.gen(function* () {
       if (!(nowMs - lastActiveMs <= PROJECT_WINDOW_MS)) continue;
       const created = yield* Effect.gen(function* () {
         const projectId = ProjectId.make(yield* crypto.randomUUIDv4);
-        const command = yield* normalizeDispatchCommand({
-          type: "project.create",
+        yield* projectService.create({
           commandId: CommandId.make(`agent-session-sync:project:${projectId}`),
           projectId,
           title: candidate.title,
           workspaceRoot: candidate.path,
           createWorkspaceRootIfMissing: false,
           defaultModelSelection: null,
-          createdAt: DateTime.formatIso(now),
         });
-        yield* engine.dispatch(command);
       }).pipe(
         Effect.provideService(ServerConfig.ServerConfig, serverConfig),
         Effect.provideService(FileSystem.FileSystem, fileSystem),
@@ -202,8 +191,8 @@ const make = Effect.gen(function* () {
     const titles = yield* readAppTitles;
     const titleFor = (source: AgentSessionSource, sessionId: string) =>
       titles.get(`${source}:${sessionId}`);
-    const projects = yield* snapshots
-      .getProjectShells()
+    const projects = yield* projectStore
+      .listShells()
       .pipe(
         Effect.mapError(
           (cause) => new AgentSessionScanError({ operation: "read-projects", cause }),
@@ -212,22 +201,13 @@ const make = Effect.gen(function* () {
     let addedThreads = 0;
     let skippedThreads = 0;
     for (const project of projects) {
-      const before = yield* importedThreadIds(project.id);
-      const result = yield* importRecentAgentThreads(
+      const result = yield* importer.importRecentAgentThreads(
         { projectId: project.id, expectedWorkspaceRoot: project.workspaceRoot },
         { titleFor },
-      ).pipe(
-        Effect.provideService(AgentSessionScanner.AgentSessionScanner, scanner),
-        Effect.provideService(OrchestrationEngine.OrchestrationEngineService, engine),
-        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, snapshots),
-        Effect.provideService(ProviderSessionDirectory.ProviderSessionDirectory, directory),
-        Effect.provideService(Crypto.Crypto, crypto),
-        Effect.exit,
-      );
+      ).pipe(Effect.exit);
       if (Exit.isFailure(result)) continue;
       skippedThreads += result.value.skippedCount;
-      const after = yield* importedThreadIds(project.id);
-      for (const threadId of after) if (!before.has(threadId)) addedThreads += 1;
+      addedThreads += result.value.importedCount;
     }
     return { addedThreads, createdProjects, skippedThreads } satisfies AgentSessionSyncResult;
   });

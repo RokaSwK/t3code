@@ -6,7 +6,7 @@ import {
   HttpClient,
   HttpClientResponse,
   HttpServerResponse,
-} from "effect/unstable/http";
+} from "effect/http";
 
 import { slackImages } from "./slackImages.ts";
 import { slackImageResponse } from "./SlackImageFetch.ts";

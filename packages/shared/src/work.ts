@@ -11,7 +11,10 @@ import {
 } from "./threadPullRequests.ts";
 import {
   type EnvironmentId,
-  type OrchestrationThreadShell,
+  type OrchestrationV2ThreadShell,
+  type ThreadId,
+  type ThreadLinkedPullRequest,
+  type ThreadPullRequestLink,
   type ProjectId,
   type ServerSettings,
   parseSlackThreadUrl,
@@ -27,25 +30,36 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
-export type WorkThread = { readonly environmentId: EnvironmentId } & Pick<
-  OrchestrationThreadShell,
-  | "id"
-  | "projectId"
-  | "title"
-  | "updatedAt"
-  | "archivedAt"
-  | "settledAt"
-  | "waitingForMergeAt"
-  | "hasPendingApprovals"
-  | "hasPendingUserInput"
-  | "hasActionableProposedPlan"
-  | "latestTurn"
-  | "backgroundLiveness"
-  | "linkedSlackThreads"
-  | "pullRequests"
-  | "linkedPullRequest"
-  | "branchPullRequest"
->;
+export interface WorkThread {
+  readonly environmentId: EnvironmentId;
+  readonly id: ThreadId;
+  readonly projectId: ProjectId;
+  readonly title: string;
+  readonly updatedAt: string;
+  readonly archivedAt: string | null;
+  readonly settledAt: string | null;
+  readonly waitingForMergeAt?: string | null | undefined;
+  readonly linkedSlackThreads?: ReadonlyArray<string> | undefined;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly hasActionableProposedPlan: boolean;
+  readonly latestTurn?: { readonly state: string } | null | undefined;
+  readonly latestRun?: { readonly status: string } | null | undefined;
+  readonly backgroundLiveness?: string | null | undefined;
+  readonly pendingBackgroundTasks?: OrchestrationV2ThreadShell["pendingBackgroundTasks"];
+  readonly pullRequests: ReadonlyArray<ThreadPullRequestLink>;
+  readonly linkedPullRequest?: ThreadLinkedPullRequest | null | undefined;
+  readonly branchPullRequest?: ThreadLinkedPullRequest | null | undefined;
+}
+
+function workRunState(thread: WorkThread): string | undefined {
+  const state = thread.latestRun?.status ?? thread.latestTurn?.state;
+  return state === "failed"
+    ? "error"
+    : state != null && ["preparing", "queued", "starting"].includes(state)
+      ? "running"
+      : state;
+}
 
 export type WorkStatus = "needs" | "working" | "waiting" | "done";
 
@@ -129,7 +143,7 @@ function agentNeeds(threads: ReadonlyArray<WorkThread>): Attention | null {
   if (threads.some((thread) => thread.hasActionableProposedPlan)) {
     return { status: "needs", reason: "Plan ready to review" };
   }
-  if (threads.some((thread) => thread.latestTurn?.state === "error")) {
+  if (threads.some((thread) => workRunState(thread) === "error")) {
     return { status: "needs", reason: "Agent stopped with an error" };
   }
   return null;
@@ -155,7 +169,12 @@ function pullRequestNeeds(pullRequests: ReadonlyArray<WorkPullRequest>): Attenti
 
 function agentWorking(threads: ReadonlyArray<WorkThread>): boolean {
   return threads.some(
-    (thread) => thread.latestTurn?.state === "running" || thread.backgroundLiveness === "working",
+    (thread) =>
+      workRunState(thread) === "running" ||
+      thread.backgroundLiveness === "working" ||
+      thread.pendingBackgroundTasks?.some(
+        (task) => task.kind === "subagent" || task.kind === "background_task",
+      ) === true,
   );
 }
 
