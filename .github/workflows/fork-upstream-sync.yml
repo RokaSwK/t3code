@@ -39,10 +39,8 @@ jobs:
         with:
           ref: personal
           fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
+      - name: Exclude reference checkouts after the full clone
+        run: git sparse-checkout set --no-cone '/*' '!/.repos/'
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
           node-version-file: package.json

@@ -56,10 +56,8 @@ jobs:
         with:
           ref: ${{ matrix.track == 'personal' && 'personal' || format('release/{0}', matrix.track) }}
           fetch-depth: 0
-          sparse-checkout: |
-            /*
-            !/.repos/
-          sparse-checkout-cone-mode: false
+      - name: Exclude reference checkouts after the full clone
+        run: git sparse-checkout set --no-cone '/*' '!/.repos/'
       - name: Fetch upstream history
         # The changelog calls commits reachable from here upstream's and everything else ours.
         run: git fetch --no-tags https://github.com/pingdotgg/t3code.git '+refs/heads/main:refs/upstream/main' '+refs/tags/*:refs/upstream/tags/*'
