@@ -2497,3 +2497,23 @@ describe("session activity performance", () => {
     });
   });
 });
+
+describe("Personal HTML renders", () => {
+  it("keeps a published page in the timeline when the reply changes", () => {
+    const htmlRender = { attachmentId: "page-html", title: "Sales", height: 400 };
+    const work = deriveWorkLogEntries([
+      makeActivity({ id: "page", kind: "html.rendered", tone: "info", payload: { htmlRender } }),
+    ]);
+    const initial = deriveTimelineEntriesWithState([], [], work);
+    expect(initial.entries).toEqual([
+      { id: "page", kind: "html-render", createdAt: "2026-02-23T00:00:00.000Z", htmlRender },
+    ]);
+    expect(deriveTimelineEntriesWithState([], [], work, initial).entries).toEqual(initial.entries);
+    const invalid = deriveWorkLogEntries([
+      makeActivity({ kind: "html.rendered", payload: { htmlRender: { height: "bad" } } }),
+    ]);
+    expect(
+      deriveTimelineEntries([], [], invalid).some((entry) => entry.kind === "html-render"),
+    ).toBe(false);
+  });
+});

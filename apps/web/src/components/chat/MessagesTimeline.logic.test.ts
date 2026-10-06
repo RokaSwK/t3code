@@ -3895,3 +3895,22 @@ describe("computeStableMessagesTimelineRows", () => {
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
   });
 });
+
+it("keeps an HTML page visible when tool history is collapsed", () => {
+  const page = {
+    kind: "html-render" as const,
+    id: "html-page",
+    createdAt: "2026-10-06T00:00:00.000Z",
+    htmlRender: { attachmentId: "page-html", title: "Sales", height: 400 },
+  };
+  const rows = deriveMessagesTimelineRows({
+    timelineEntries: [page],
+    latestTurn: null,
+    runningTurnId: null,
+    isWorking: false,
+    activeTurnStartedAt: null,
+    turnDiffSummaries: [],
+    supportsConversationRollback: false,
+  });
+  expect(rows).toContainEqual(page);
+});

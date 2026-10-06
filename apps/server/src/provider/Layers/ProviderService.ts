@@ -915,7 +915,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
   ) {
     // The personal fork gives every thread the Work tools, not only the Work agent's folder.
-    const capabilities = new Set<McpInvocationContext.McpCapability>(["pull-requests", "work"]);
+    const capabilities = new Set<McpInvocationContext.McpCapability>([
+      "pull-requests",
+      "work",
+      "html",
+    ]);
     const access = yield* agentAccessSettings(threadId);
     if (access.browser) capabilities.add("preview");
     if (access.device) capabilities.add("device");

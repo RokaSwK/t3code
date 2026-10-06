@@ -3748,3 +3748,33 @@ it("keeps attachment-only question answers expandable outside mobile work groups
   expect(running[1]).toBe(group);
   expect(running[2]?.type).toBe("work-toggle");
 });
+
+describe("Personal HTML renders", () => {
+  it("keeps published pages visible outside collapsed tool groups", () => {
+    const htmlRender = { attachmentId: "page-html", title: "Sales", height: 400 };
+    const thread = makeThread({
+      id: ThreadId.make("page-thread"),
+      projectId: ProjectId.make("project"),
+      title: "Page",
+      activities: [
+        makeActivity({
+          id: EventId.make("page"),
+          kind: "html.rendered",
+          summary: "Sales",
+          createdAt: "2026-04-01T00:00:01.000Z",
+          payload: { htmlRender },
+        }),
+      ],
+    });
+    const feed = deriveThreadFeedPresentation(buildThreadFeed(thread), null, new Set());
+    expect(feed).toEqual([
+      {
+        type: "html-render",
+        id: "page",
+        createdAt: "2026-04-01T00:00:01.000Z",
+        threadId: thread.id,
+        htmlRender,
+      },
+    ]);
+  });
+});

@@ -103,6 +103,10 @@
       "types": "./src/toolActivity.ts",
       "import": "./src/toolActivity.ts"
     },
+    "./htmlRender": {
+      "types": "./src/htmlRender.ts",
+      "import": "./src/htmlRender.ts"
+    },
     "./favicon": {
       "types": "./src/favicon.ts",
       "import": "./src/favicon.ts"

@@ -58,6 +58,7 @@ import {
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
 import {
+  threadHtmlRenderAttachmentIds,
   attachmentRelativePath,
   parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
@@ -2023,6 +2024,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const activities = yield* projectionThreadActivityRepository.listByThreadId({
             threadId: ThreadId.make(threadId),
           });
+          for (const id of threadHtmlRenderAttachmentIds(threadId, activities))
+            retainedPaths.add(`${id}.html`);
           for (const activity of activities) {
             if (activity.kind !== "user-input.answer-submitted") continue;
             const payload = decodeQuestionAttachmentAnswer(activity.payload);

@@ -348,6 +348,7 @@ function isActivityEntry(entry: TimelineEntry): entry is ActivityEntry {
 }
 
 export type MessagesTimelineRow =
+  | Extract<TimelineEntry, { kind: "html-render" }>
   | {
       kind: "activity-group";
       id: string;
@@ -1364,6 +1365,11 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "html-render") {
+      nextRows.push(timelineEntry);
+      continue;
+    }
+
     if (timelineEntry.kind === "proposed-plan") {
       nextRows.push({
         kind: "proposed-plan",
@@ -1599,6 +1605,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
+    case "html-render":
+      return a.htmlRender === (b as typeof a).htmlRender;
     case "activity-group": {
       const group = b as typeof a;
       return (

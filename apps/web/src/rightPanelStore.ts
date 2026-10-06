@@ -1,3 +1,4 @@
+import type { ChatFileAttachment } from "./types";
 /**
  * Thread-scoped right-panel surface state.
  *
@@ -8,12 +9,7 @@
  * workspace paths, and diff/files remain singleton surfaces.
  */
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import {
-  EnvironmentId,
-  ThreadId,
-  type ChatFileAttachment,
-  type ScopedThreadRef,
-} from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 

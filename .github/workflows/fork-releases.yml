@@ -50,19 +50,19 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      # Full history (without blobs) so the changelog can list commits since the last build.
+      # Full objects avoid fetching upstream-only merge blobs from the fork promisor remote.
+      # Sparse checkout keeps vendored references out of the build workspace.
       - uses: actions/checkout@v4
         with:
           ref: ${{ matrix.track == 'personal' && 'personal' || format('release/{0}', matrix.track) }}
           fetch-depth: 0
-          filter: blob:none
           sparse-checkout: |
             /*
             !/.repos/
           sparse-checkout-cone-mode: false
       - name: Fetch upstream history
         # The changelog calls commits reachable from here upstream's and everything else ours.
-        run: git fetch --no-tags --filter=blob:none https://github.com/pingdotgg/t3code.git '+refs/heads/main:refs/upstream/main' '+refs/tags/*:refs/upstream/tags/*'
+        run: git fetch --no-tags https://github.com/pingdotgg/t3code.git '+refs/heads/main:refs/upstream/main' '+refs/tags/*:refs/upstream/tags/*'
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
           node-version-file: package.json

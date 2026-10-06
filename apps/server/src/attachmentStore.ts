@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 import type { ChatAttachment } from "@t3tools/contracts";
+import { htmlRenderFromActivity } from "@t3tools/shared/htmlRender";
 
 import {
   normalizeAttachmentRelativePath,
@@ -98,6 +99,25 @@ export function parseThreadSegmentFromAttachmentId(attachmentId: string): string
     return null;
   }
   return match[1]?.toLowerCase() ?? null;
+}
+
+/**
+ * Attachments a thread's `html_render` tool calls published. Only ids minted
+ * for this thread count, so deleting a fork never removes its source's pages.
+ */
+export function threadHtmlRenderAttachmentIds(
+  threadId: string,
+  items: Iterable<{ readonly kind: string; readonly payload: unknown }>,
+) {
+  const segment = toSafeThreadAttachmentSegment(threadId);
+  if (segment === null) return [];
+  return Array.from(items).flatMap((item) => {
+    const attachmentId = htmlRenderFromActivity(item)?.attachmentId;
+    return attachmentId !== undefined &&
+      parseThreadSegmentFromAttachmentId(attachmentId) === segment
+      ? [attachmentId]
+      : [];
+  });
 }
 
 /** Null for attachment types this build does not know; callers skip those. */

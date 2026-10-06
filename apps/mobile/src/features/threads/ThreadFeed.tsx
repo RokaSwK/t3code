@@ -1,3 +1,5 @@
+import { htmlRenderFrameHeight } from "@t3tools/shared/htmlRender";
+import { htmlRenderRowHeight, ThreadHtmlRender } from "./HtmlRenderWebView";
 import {
   WorktreeWorkingHeader,
   WorktreeSetupCard,
@@ -1393,6 +1395,18 @@ function renderFeedEntry(
   const entry = info.item;
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
 
+  if (entry.type === "html-render") {
+    return (
+      <ThreadHtmlRender
+        environmentId={props.environmentId}
+        threadId={entry.threadId}
+        render={entry.htmlRender}
+        frameWidth={props.markdownContentWidth}
+        iconColor={props.iconSubtleColor}
+      />
+    );
+  }
+
   if (entry.type === "turn-fold") {
     return (
       <Pressable
@@ -2714,6 +2728,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // average once one of their type has been measured.
   const getFixedItemSize = useCallback(
     (entry: ThreadFeedEntry) => {
+      if (entry.type === "html-render")
+        return htmlRenderRowHeight(htmlRenderFrameHeight(entry.htmlRender, markdownContentWidth));
       if (workRowSizing.fixedRowHeight === undefined) {
         return undefined;
       }
@@ -2741,8 +2757,21 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           return undefined;
       }
     },
-    [expandedReasoningMessageIds, expandedWorkRows, workRowSizing.fixedRowHeight],
+    [
+      expandedReasoningMessageIds,
+      expandedWorkRows,
+      workRowSizing.fixedRowHeight,
+      markdownContentWidth,
+    ],
   );
+
+  const hasHtmlRenders = useMemo(
+    () => presentedFeed.some((entry) => entry.type === "html-render"),
+    [presentedFeed],
+  );
+  useEffect(() => {
+    if (hasHtmlRenders) props.listRef.current?.clearCaches({ mode: "sizes" });
+  }, [markdownContentWidth, hasHtmlRenders, props.listRef]);
 
   // Disclosures can mount existing offscreen rows as well as new work rows.
   // Fade those in after movement; never retain removed rows over replacements.

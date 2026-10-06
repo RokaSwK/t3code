@@ -1,3 +1,4 @@
+import { htmlRenderFromActivity, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import {
   requestKindFromRequestType,
   type PendingApproval,
@@ -54,6 +55,7 @@ export {
 } from "@t3tools/client-runtime/work-log/presentation";
 
 export interface WorkLogEntry {
+  htmlRender?: HtmlRenderReference;
   questionAnswer?: UserInputAttachmentAnswerPayload;
   id: string;
   createdAt: string;
@@ -132,6 +134,7 @@ export interface LatestProposedPlanState {
 }
 
 export type TimelineEntry =
+  | { id: string; kind: "html-render"; createdAt: string; htmlRender: HtmlRenderReference }
   | {
       id: string;
       kind: "message";
@@ -489,6 +492,8 @@ export function deriveWorkLogEntries(
     if (isPlanBoundaryToolActivity(activity)) continue;
     if (isAgentInternalActivity(activity)) continue;
     const entry = toDerivedWorkLogEntry(activity);
+    const htmlRender = htmlRenderFromActivity(activity);
+    if (htmlRender) entry.htmlRender = htmlRender;
     // Native agent launches get their visible row from task.started. Defer
     // their active tool row so another launch cannot duplicate the batch.
     if (
@@ -1448,6 +1453,13 @@ function timelineEntryFromProposedPlan(proposedPlan: ProposedPlan): TimelineEntr
 }
 
 function timelineEntryFromWork(workEntry: WorkLogEntry): TimelineEntry {
+  if (workEntry.htmlRender)
+    return {
+      id: workEntry.id,
+      kind: "html-render",
+      createdAt: workEntry.createdAt,
+      htmlRender: workEntry.htmlRender,
+    };
   return {
     id: workEntry.id,
     kind: "work",
@@ -1466,6 +1478,7 @@ function timelineEntrySourceOrder(entry: TimelineEntry): number {
       return 0;
     case "proposed-plan":
       return 1;
+    case "html-render":
     case "work":
       return 2;
   }

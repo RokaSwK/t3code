@@ -15,6 +15,7 @@ import {
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
   sweepStalePendingAttachments,
+  threadHtmlRenderAttachmentIds,
 } from "./attachmentStore.ts";
 
 describe("attachmentStore", () => {
@@ -195,5 +196,23 @@ describe("attachmentStore", () => {
     } finally {
       NodeFS.rmSync(attachmentsDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("threadHtmlRenderAttachmentIds", () => {
+  it("returns pages this thread published and skips other threads and other activities", () => {
+    const own = createAttachmentId("thread-a", "html")!;
+    const other = createAttachmentId("thread-b", "html")!;
+    const render = (attachmentId: string) => ({
+      kind: "html.rendered",
+      payload: { htmlRender: { attachmentId, title: "x", height: 300 } },
+    });
+    expect(
+      threadHtmlRenderAttachmentIds("thread-a", [
+        render(own),
+        render(other),
+        { kind: "tool.completed", payload: render(own).payload },
+      ]),
+    ).toEqual([own]);
   });
 });

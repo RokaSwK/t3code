@@ -1,3 +1,4 @@
+import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
 import { ReadOnlySourcePreview } from "../files/AttachmentFilePreview";
 import { useRightPanelStore } from "~/rightPanelStore";
@@ -1719,6 +1720,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       }
       data-message-role={row.kind === "message" ? row.message.role : undefined}
     >
+      {row.kind === "html-render" ? <HtmlRenderTimelineRow row={row} /> : null}
       {row.kind === "work" ? (
         <WorkGroupSection
           anchorKey={row.id}
@@ -5003,5 +5005,20 @@ function QuestionAnswerHistory({
         </div>
       ))}
     </div>
+  );
+}
+
+function HtmlRenderTimelineRow({
+  row,
+}: {
+  row: Extract<MessagesTimelineRow, { kind: "html-render" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  return (
+    <HtmlRenderFrame
+      environmentId={ctx.activeThreadEnvironmentId}
+      htmlRender={row.htmlRender}
+      onOpen={ctx.onFileOpen}
+    />
   );
 }

@@ -1,3 +1,4 @@
+import { htmlRenderFromActivity, type HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import * as Option from "effect/Option";
 import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Schema from "effect/Schema";
@@ -133,7 +134,16 @@ interface DerivedWorkLogEntry extends WorkLogEntry {
   isBackgroundTask?: boolean;
 }
 
+type HtmlRenderFeedEntry = {
+  readonly type: "html-render";
+  readonly id: string;
+  readonly createdAt: string;
+  readonly threadId: OrchestrationThread["id"];
+  readonly htmlRender: HtmlRenderReference;
+};
+
 type RawThreadFeedEntry =
+  | HtmlRenderFeedEntry
   | {
       readonly type: "message";
       readonly id: string;
@@ -149,6 +159,7 @@ type RawThreadFeedEntry =
     };
 
 export type ThreadFeedEntry =
+  | HtmlRenderFeedEntry
   | (Extract<RawThreadFeedEntry, { type: "message" }> & {
       readonly reasoningMessages?: OrchestrationThread["messages"];
     })
@@ -2404,7 +2415,8 @@ export function buildPendingUserInputAnswers(
 }
 
 export function buildThreadFeed(
-  thread: Pick<OrchestrationThread, "messages" | "activities">,
+  thread: Pick<OrchestrationThread, "messages" | "activities"> &
+    Partial<Pick<OrchestrationThread, "id">>,
   options?: {
     readonly loadedMessages?: ReadonlyArray<OrchestrationThread["messages"][number]>;
     readonly localMessages?: ReadonlyArray<OrchestrationThread["messages"][number]>;
@@ -2439,7 +2451,28 @@ export function buildThreadFeed(
           }
           return entry;
         }),
-      ...activityEntries,
+      ...activityEntries.filter(
+        (entry) => entry.activity.workEntry.sourceActivityKind !== "html.rendered",
+      ),
+      ...thread.activities.flatMap((activity): HtmlRenderFeedEntry[] => {
+        const htmlRender = htmlRenderFromActivity(activity);
+        if (
+          !htmlRender ||
+          !thread.id ||
+          (oldestLoadedMessageCreatedAt !== null &&
+            activity.createdAt < oldestLoadedMessageCreatedAt)
+        )
+          return [];
+        return [
+          {
+            type: "html-render",
+            id: activity.id,
+            createdAt: activity.createdAt,
+            threadId: thread.id,
+            htmlRender,
+          },
+        ];
+      }),
     ],
     (s) => new Date(s.createdAt),
     Order.Date,
