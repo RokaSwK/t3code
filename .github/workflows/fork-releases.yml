@@ -50,26 +50,41 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - name: Checkout release source
-        env:
-          SOURCE_REF: ${{ matrix.track == 'personal' && 'personal' || format('release/{0}', matrix.track) }}
-        run: |
-          git init .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          git fetch --no-tags --depth=1 origin "$SOURCE_REF"
-          git sparse-checkout set --no-cone '/*' '!/.repos/'
-          git checkout --detach FETCH_HEAD
+      # Full objects avoid fetching upstream-only merge blobs from the fork promisor remote.
+      # Sparse checkout keeps vendored references out of the build workspace.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.track == 'personal' && 'personal' || format('release/{0}', matrix.track) }}
+          fetch-depth: 0
+      - name: Exclude reference checkouts after the full clone
+        run: git sparse-checkout set --no-cone '/*' '!/.repos/'
+      - name: Fetch upstream history
+        # The changelog calls commits reachable from here upstream's and everything else ours.
+        run: git fetch --no-tags https://github.com/pingdotgg/t3code.git '+refs/heads/main:refs/upstream/main' '+refs/tags/*:refs/upstream/tags/*'
       - uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
         with:
           node-version-file: package.json
           run-install: false
       - run: vp i --frozen-lockfile
+      - name: Include the newest upstream nightly
+        # Every Personal build must include the newest nightly; blocked merges fail visibly.
+        if: matrix.track == 'personal'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/include-upstream-nightly.sh
+      - name: Check nightly release gate
+        run: node --test .github/scripts/include-upstream-nightly.test.cjs
       - name: Check channel behavior
-        run: vp test run packages/shared/src/desktopReleaseChannels.test.ts apps/desktop/src/updates/updateChannels.test.ts
+        run: vp test run packages/shared/src/desktopReleaseChannels.test.ts apps/desktop/src/updates/updateChannels.test.ts scripts/fork-release-notes.test.ts
       - name: Build
         env:
           TRACK: ${{ matrix.track }}
           SIGNED: ${{ (inputs.signed || vars.FORK_SIGNED_RELEASES == 'true') && 'true' || 'false' }}
+          # Public T3 Connect identifiers, baked into the bundle. Without them Connect is disabled.
+          T3CODE_CLERK_PUBLISHABLE_KEY: ${{ vars.CLERK_PUBLISHABLE_KEY }}
+          T3CODE_CLERK_JWT_TEMPLATE: ${{ vars.CLERK_JWT_TEMPLATE }}
+          T3CODE_CLERK_CLI_OAUTH_CLIENT_ID: ${{ vars.CLERK_CLI_OAUTH_CLIENT_ID }}
+          T3CODE_RELAY_URL: ${{ vars.RELAY_URL }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
@@ -106,14 +121,27 @@ jobs:
         run: |
           set -euo pipefail
           tag="desktop-$TRACK"
+          if [ -n "${MERGED_NIGHTLY:-}" ]; then
+            # Record the merge on the branch. Losing a race with a new push is fine: that push
+            # builds again and merges again.
+            git push origin HEAD:personal || echo "::warning::Could not push the $MERGED_NIGHTLY merge to personal"
+          fi
+          previous="$RUNNER_TEMP/previous-notes.md"
+          gh release view "$tag" --json body --jq .body > "$previous" 2>/dev/null || : > "$previous"
           notes="$RUNNER_TEMP/release-notes.md"
           printf 'Version: `%s`\n\nSource: `%s`\n\n' "$RELEASE_VERSION" "$(git rev-parse HEAD)" > "$notes"
+          if [ -n "${UPSTREAM_NIGHTLY:-}" ]; then
+            printf 'Upstream nightly: `%s`\n\n' "$UPSTREAM_NIGHTLY" >> "$notes"
+          fi
           if [ "$SIGNED" = true ]; then
             printf 'Signed release. Select this track in Settings → About → Update track.\n' >> "$notes"
           else
-            printf 'Manual download for Apple Silicon. Unzip and replace T3 Code.app. Automatic installation is disabled until signing is configured.\n' >> "$notes"
+            printf 'Apple Silicon build. Installed T3 Code on this track updates itself from Settings → About; for a first install, unzip and drag T3 Code.app to Applications.\n' >> "$notes"
           fi
-          printf '\nStable, Nightly, and Personal use separate data profiles. Personal preserves the existing ~/.t3-personal profile.\n' >> "$notes"
+          printf '\nStable, Nightly, and Personal use separate data profiles. Personal preserves the existing ~/.t3-personal profile.\n\n' >> "$notes"
+          # What changed, per build, shown when hovering the update in the app.
+          node scripts/fork-release-notes.ts --version "$RELEASE_VERSION" --previous "$previous" \
+            ${RELEASE_NOTE:+--note "$RELEASE_NOTE"} >> "$notes"
           prerelease=(--prerelease=false)
           [ "$TRACK" = stable ] || prerelease=(--prerelease)
           if gh release view "$tag" >/dev/null 2>&1; then
@@ -126,3 +154,9 @@ jobs:
             files+=(release/fork/*-mac.yml release/fork/*.blockmap)
           fi
           gh release upload "$tag" "${files[@]}" --clobber
+          # The in-app updater installs the newest archive it finds. The previous one stays so
+          # a download that started from an earlier check still resolves; older ones go.
+          keep=$(gh release view "$tag" --json assets --jq '[.assets[].name | select(endswith(".zip"))] | sort | reverse | .[0:2] | .[]')
+          for asset in $(gh release view "$tag" --json assets --jq '.assets[].name | select(endswith(".zip"))'); do
+            printf '%s\n' "$keep" | grep -qx "$asset" || gh release delete-asset "$tag" "$asset" --yes
+          done
